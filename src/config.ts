@@ -47,6 +47,12 @@ export const configSchema = z.object({
       requireStillRequested: z.boolean().default(true),
     })
     .prefault({}),
+  statusPage: z
+    .object({
+      enabled: z.boolean().default(true),
+      port: z.number().int().min(1).max(65535).default(4777),
+    })
+    .prefault({}),
   notify: z
     .object({
       enabled: z.boolean().default(true),

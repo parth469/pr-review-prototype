@@ -13,6 +13,8 @@ export interface PollDeps {
   log: Logger;
   /** Called after a poll that queued work, so the worker can start at once. */
   onQueued?: () => void;
+  /** Called after every poll in the loop, with its summary or error. */
+  onPolled?: (result: PollSummary | Error) => void;
 }
 
 export interface PollSummary {
@@ -86,9 +88,11 @@ export async function startPolling(deps: PollDeps, signal: AbortSignal): Promise
       const summary = await pollOnce(deps);
       failures = 0;
       deps.log.debug(summary, "poll finished");
+      deps.onPolled?.(summary);
     } catch (err) {
       failures++;
       deps.log.error({ err, failures }, "poll failed");
+      deps.onPolled?.(err as Error);
     }
 
     const delay =

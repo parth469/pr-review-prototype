@@ -1,0 +1,194 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseConfig } from "../src/config.ts";
+import { createRuntime, isPostingPaused } from "../src/runtime.ts";
+import { openState, type State } from "../src/state.ts";
+import { type StatusServer, startStatusServer } from "../src/web/server.ts";
+import { silentLog } from "./helpers.ts";
+
+// fetch() can't send a forged Host header, so use node:http directly.
+function call(
+  port: number,
+  path: string,
+  { method = "GET", token, host }: { method?: string; token?: string; host?: string } = {},
+): Promise<{ status: number; body: string; headers: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method,
+        headers: {
+          Host: host ?? `127.0.0.1:${port}`,
+          ...(token ? { "X-Proxy-Token": token } : {}),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (c) => {
+          body += c;
+        });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("status server", () => {
+  let state: State;
+  let server: StatusServer;
+  let kicks: number;
+  let dir: string;
+
+  const seed = (pr: number) =>
+    state.recordSeen({
+      repo: "acme/api",
+      pr,
+      headSha: `sha${pr}`,
+      title: `PR ${pr}`,
+      url: `https://github.com/acme/api/pull/${pr}`,
+      decision: { action: "queue" },
+    });
+
+  beforeEach(async () => {
+    state = openState(":memory:");
+    dir = mkdtempSync(join(tmpdir(), "proxy-web-"));
+    kicks = 0;
+    const started = await startStatusServer({
+      state,
+      config: parseConfig({}),
+      runtime: createRuntime("me"),
+      worker: { kick: () => void kicks++ },
+      log: silentLog,
+      port: 0,
+    });
+    if (!started) throw new Error("server did not start");
+    server = started;
+  });
+  afterEach(async () => {
+    await server.close();
+    state.close();
+  });
+
+  it("serves the page with the token and a strict content policy", async () => {
+    const res = await call(server.port, "/");
+    expect(res.status).toBe(200);
+    expect(res.body).toContain(`var TOKEN = "${server.token}";`);
+    expect(String(res.headers["content-security-policy"])).toContain("default-src 'none'");
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("refuses a request for another host name (DNS rebinding)", async () => {
+    const res = await call(server.port, "/api/jobs", { host: "evil.example:4777" });
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses button calls without the token", async () => {
+    expect((await call(server.port, "/api/posting/pause", { method: "POST" })).status).toBe(403);
+    expect(
+      (await call(server.port, "/api/posting/pause", { method: "POST", token: "wrong" })).status,
+    ).toBe(403);
+    expect(isPostingPaused(state)).toBe(false);
+  });
+
+  it("pauses and resumes posting, and resume wakes the worker", async () => {
+    const post = (p: string) => call(server.port, p, { method: "POST", token: server.token });
+    expect(JSON.parse((await post("/api/posting/pause")).body)).toEqual({ postingPaused: true });
+    expect(isPostingPaused(state)).toBe(true);
+    const status = JSON.parse((await call(server.port, "/api/status")).body);
+    expect(status).toMatchObject({ viewer: "me", postingPaused: true });
+    await post("/api/posting/resume");
+    expect(isPostingPaused(state)).toBe(false);
+    expect(kicks).toBe(1);
+  });
+
+  it("lists recent jobs and shows one with its saved review", async () => {
+    seed(1);
+    seed(2);
+    const job = state.claimNext();
+    if (!job) throw new Error("no job");
+    const out = join(dir, "r1");
+    mkdirSync(out);
+    writeFileSync(
+      join(out, "result.json"),
+      JSON.stringify({ review: { summary: "s", verdict: "no_issues", findings: [] } }),
+    );
+    state.completeReview(job.id, { findings: 0, outputDir: out, costUsd: 0.1, durationMs: 1 });
+
+    const list = JSON.parse((await call(server.port, "/api/jobs")).body);
+    expect(list.map((j: { pr: number }) => j.pr)).toEqual([1, 2]); // most recently updated first
+    const detail = JSON.parse((await call(server.port, `/api/jobs/${job.id}`)).body);
+    expect(detail.review.review.summary).toBe("s");
+    expect((await call(server.port, "/api/jobs/999")).status).toBe(404);
+  });
+
+  it("retries a failed job: post again when a review is saved, review again when not", async () => {
+    seed(1);
+    seed(2);
+    const withReview = state.claimNext();
+    const without = state.claimNext();
+    if (!withReview || !without) throw new Error("no jobs");
+    const out = join(dir, "saved");
+    mkdirSync(out);
+    writeFileSync(join(out, "result.json"), "{}");
+    state.completeReview(withReview.id, { findings: 1, outputDir: out, costUsd: 0, durationMs: 0 });
+    state.claimNext();
+    state.failAttempt(withReview.id, "502", 1, { retryStatus: "reviewed" });
+    state.failAttempt(without.id, "boom", 1);
+
+    const post = (id: number, a: string) =>
+      call(server.port, `/api/jobs/${id}/${a}`, { method: "POST", token: server.token });
+    expect(JSON.parse((await post(withReview.id, "retry")).body)).toMatchObject({
+      status: "reviewed",
+      attempts: 0,
+      error: null,
+    });
+    expect(JSON.parse((await post(without.id, "retry")).body)).toMatchObject({ status: "queued" });
+    expect(kicks).toBe(2);
+    // Retry only applies to failed jobs.
+    expect((await post(without.id, "retry")).status).toBe(409);
+  });
+
+  it("re-reviews a finished job and reviews a skipped one now", async () => {
+    state.recordSeen({
+      repo: "acme/api",
+      pr: 5,
+      headSha: "d",
+      title: "Draft",
+      url: "u",
+      decision: { action: "skip", reason: "draft" },
+    });
+    const skipped = state.listByStatus("skipped")[0];
+    if (!skipped) throw new Error("no job");
+    const post = (a: string) =>
+      call(server.port, `/api/jobs/${skipped.id}/${a}`, { method: "POST", token: server.token });
+
+    expect((await post("rereview")).status).toBe(200); // skipped can be re-reviewed too
+    expect(state.get(skipped.id)?.status).toBe("queued");
+    expect((await post("review-now")).status).toBe(409); // no longer skipped
+    expect((await post("explode")).status).toBe(404);
+  });
+
+  it("gives up quietly when the port is taken", async () => {
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(0, "127.0.0.1", () => r()));
+    const port = (blocker.address() as { port: number }).port;
+    const second = await startStatusServer({
+      state,
+      config: parseConfig({}),
+      runtime: createRuntime("me"),
+      worker: { kick: () => undefined },
+      log: silentLog,
+      port,
+    });
+    expect(second).toBeUndefined();
+    blocker.close();
+  });
+});

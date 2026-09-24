@@ -86,6 +86,7 @@ const MIGRATIONS: string[] = [
    ALTER TABLE jobs ADD COLUMN duration_ms INTEGER;`,
   `ALTER TABLE jobs ADD COLUMN review_url TEXT;
    ALTER TABLE jobs ADD COLUMN event TEXT;`,
+  `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ];
 
 export interface PublishOutcome {
@@ -119,7 +120,7 @@ export interface State {
    * Atomically claim the oldest ready job: queued -> preparing (needs a review) or
    * reviewed -> posting (review done, needs publishing). The returned status says which.
    */
-  claimNext(now?: Date): Job | undefined;
+  claimNext(now?: Date, options?: { skipPosting?: boolean }): Job | undefined;
   /** Claim one specific queued or reviewed job, ignoring its retry time. */
   claimById(id: number): Job | undefined;
   setStatus(id: number, status: JobStatus): void;
@@ -141,6 +142,15 @@ export interface State {
   recoverStale(): number;
   get(id: number): Job | undefined;
   listByStatus(status: JobStatus): Job[];
+  /** Most recently updated jobs first. */
+  listRecent(limit: number): Job[];
+  /**
+   * Send a job back to `queued` (review again) or `reviewed` (post again) with a fresh
+   * attempt budget, but only from one of the given statuses. Returns undefined otherwise.
+   */
+  resetJob(id: number, to: "queued" | "reviewed", from: JobStatus[]): Job | undefined;
+  getSetting(key: string): string | undefined;
+  setSetting(key: string, value: string): void;
   close(): void;
 }
 
@@ -180,6 +190,26 @@ export function openState(path: string): State {
        ORDER BY id LIMIT 1
      )
      RETURNING *`,
+  );
+  // Same as claim, but leaves reviewed jobs alone while posting is paused.
+  const claimReviewOnly = db.prepare(
+    `UPDATE jobs SET status = 'preparing', started_at = ?, updated_at = ?
+     WHERE id = (
+       SELECT id FROM jobs
+       WHERE status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+       ORDER BY id LIMIT 1
+     )
+     RETURNING *`,
+  );
+  const reset = db.prepare(
+    `UPDATE jobs SET status = ?, reason = NULL, error = NULL, attempts = 0,
+       next_attempt_at = NULL, updated_at = ?
+     WHERE id = ?`,
+  );
+  const selectRecent = db.prepare("SELECT * FROM jobs ORDER BY updated_at DESC, id DESC LIMIT ?");
+  const readSetting = db.prepare("SELECT value FROM settings WHERE key = ?");
+  const writeSetting = db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
   );
   const claimOne = db.prepare(
     `UPDATE jobs SET ${nextStep}, started_at = ?, updated_at = ?
@@ -252,9 +282,9 @@ export function openState(path: string): State {
       return toJob(findJob.get(repo, pr, headSha)) as Job;
     },
 
-    claimNext(now = new Date()) {
+    claimNext(now = new Date(), { skipPosting = false } = {}) {
       const t = iso(now);
-      return toJob(claim.get(t, t, t));
+      return toJob((skipPosting ? claimReviewOnly : claim).get(t, t, t));
     },
 
     claimById(id) {
@@ -299,6 +329,25 @@ export function openState(path: string): State {
 
     listByStatus(status) {
       return selectByStatus.all(status) as unknown as Job[];
+    },
+
+    listRecent(limit) {
+      return selectRecent.all(limit) as unknown as Job[];
+    },
+
+    resetJob(id, to, from) {
+      const job = toJob(getJob.get(id));
+      if (!job || !from.includes(job.status)) return undefined;
+      reset.run(to, iso(), id);
+      return toJob(getJob.get(id));
+    },
+
+    getSetting(key) {
+      return (readSetting.get(key) as { value: string } | undefined)?.value;
+    },
+
+    setSetting(key, value) {
+      writeSetting.run(key, value);
     },
 
     close() {

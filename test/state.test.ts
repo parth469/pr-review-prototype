@@ -177,6 +177,56 @@ describe("state", () => {
       expect(state.claimById(job.id)?.status).toBe("preparing");
       expect(state.claimById(job.id)).toBeUndefined();
     });
+
+    it("leaves reviewed jobs alone while posting is paused", () => {
+      state.recordSeen(base);
+      state.recordSeen({ ...base, pr: 129 });
+      const first = state.claimNext();
+      if (!first) throw new Error("no job");
+      state.completeReview(first.id, { findings: 1, outputDir: "/r", costUsd: 0, durationMs: 0 });
+
+      // Paused: skips the reviewed job and takes the next review instead.
+      expect(state.claimNext(undefined, { skipPosting: true })?.pr).toBe(129);
+      expect(state.claimNext(undefined, { skipPosting: true })).toBeUndefined();
+      expect(state.claimNext()).toMatchObject({ id: first.id, status: "posting" });
+    });
+  });
+
+  describe("status page helpers", () => {
+    it("resets a job only from the allowed statuses", () => {
+      state.recordSeen(base);
+      const job = state.claimNext();
+      if (!job) throw new Error("no job");
+      state.failAttempt(job.id, "boom", 1);
+      expect(state.resetJob(job.id, "queued", ["done"])).toBeUndefined();
+      expect(state.resetJob(job.id, "queued", ["failed"])).toMatchObject({
+        status: "queued",
+        attempts: 0,
+        error: null,
+        next_attempt_at: null,
+      });
+      expect(state.resetJob(999, "queued", ["failed"])).toBeUndefined();
+    });
+
+    it("lists the most recently updated jobs first", async () => {
+      state.recordSeen(base);
+      state.recordSeen({ ...base, pr: 129 });
+      state.recordSeen({ ...base, pr: 130 });
+      const first = state.listByStatus("queued")[0];
+      if (!first) throw new Error("no job");
+      await new Promise((r) => setTimeout(r, 5)); // a later timestamp than the inserts
+      state.skip(first.id, "draft"); // touch the oldest
+      const recent = state.listRecent(2).map((j) => j.pr);
+      expect(recent[0]).toBe(128);
+      expect(recent).toHaveLength(2);
+    });
+
+    it("stores settings", () => {
+      expect(state.getSetting("posting_paused")).toBeUndefined();
+      state.setSetting("posting_paused", "true");
+      state.setSetting("posting_paused", "false");
+      expect(state.getSetting("posting_paused")).toBe("false");
+    });
   });
 
   it("upgrades an M1 database in place", () => {

@@ -94,6 +94,7 @@ describe("worker", () => {
   afterEach(() => state.close());
 
   let events: WorkerEvent[] = [];
+  let pausedFlag = false;
   const make = (
     workspace: Workspace,
     runReview: RunReview,
@@ -109,7 +110,25 @@ describe("worker", () => {
       log: silentLog,
       pluginPath: async () => "/plugins/caveman",
       onEvent: (e) => void events.push(e),
+      isPostingPaused: () => pausedFlag,
     });
+
+  it("keeps the review but does not post while posting is paused, then posts on resume", async () => {
+    pausedFlag = true;
+    const publisher = fakePublisher([posted]);
+    const review = countingReview();
+    const worker = make(fakeWorkspace(root), review, publisher);
+
+    const job = await worker.processOne();
+    expect(job).toMatchObject({ status: "reviewed", findings: 2 });
+    expect(publisher.calls).toBe(0);
+    expect(await worker.processOne()).toBeUndefined(); // nothing else to do while paused
+
+    pausedFlag = false;
+    expect(await worker.processOne()).toMatchObject({ status: "done", review_id: 555 });
+    expect(publisher.calls).toBe(1);
+    expect(review.calls).toBe(1);
+  });
 
   it("reports a posted review and a final failure, but not a retry", async () => {
     events = [];

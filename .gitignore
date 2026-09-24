@@ -7,3 +7,4 @@ reviews/
 .env
 *.log
 *.stackdump
+.playwright-mcp/

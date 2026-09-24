@@ -32,6 +32,7 @@ describe("config", () => {
         keepWorktree: false,
       },
       publish: { mode: "submit", requireStillRequested: true },
+      statusPage: { enabled: true, port: 4777 },
       notify: { enabled: true, onPosted: true, onFailed: true },
     });
   });

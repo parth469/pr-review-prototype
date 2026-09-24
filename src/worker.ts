@@ -21,6 +21,8 @@ export interface WorkerDeps {
   pluginPath: () => Promise<string>;
   /** Notable outcomes, e.g. for desktop notifications. Must not throw. */
   onEvent?: (event: WorkerEvent) => void;
+  /** While true, reviews still run but wait as `reviewed` instead of being posted. */
+  isPostingPaused?: () => boolean;
 }
 
 export type WorkerEvent =
@@ -215,10 +217,19 @@ export function createWorker(deps: WorkerDeps): Worker {
     jobId?: number,
     options: PublishOptions = {},
   ): Promise<Job | undefined> {
-    const job = jobId === undefined ? state.claimNext() : state.claimById(jobId);
+    const paused = () => deps.isPostingPaused?.() ?? false;
+    const job =
+      jobId === undefined
+        ? state.claimNext(undefined, { skipPosting: paused() })
+        : state.claimById(jobId);
     if (!job) return undefined;
     const fields = { job: job.id, repo: job.repo, pr: job.pr, sha: job.head_sha.slice(0, 7) };
 
+    if (job.status === "posting" && paused()) {
+      state.setStatus(job.id, "reviewed"); // wait for resume
+      log.info(fields, "posting paused, review kept");
+      return state.get(job.id);
+    }
     if (job.status === "posting") {
       // Review already saved by an earlier pass; only the post is left.
       try {
@@ -234,7 +245,9 @@ export function createWorker(deps: WorkerDeps): Worker {
     }
 
     const reviewed = await review(job, fields, signal);
-    if (reviewed && !signal?.aborted) {
+    if (reviewed && paused()) {
+      log.info(fields, "review saved, posting paused");
+    } else if (reviewed && !signal?.aborted) {
       const posting = state.claimById(job.id); // reviewed -> posting
       if (posting) await publish(posting, reviewed.run, reviewed.outDir, fields, options);
     }

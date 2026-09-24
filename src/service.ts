@@ -114,6 +114,9 @@ async function install(): Promise<void> {
   console.log(await schtasks(["/Create", "/TN", TASK_NAME, "/XML", file, "/F"]));
   console.log(await schtasks(["/Run", "/TN", TASK_NAME]));
   console.log(`Installed. It starts at every logon. Check it with: npm run status`);
+  console.log(
+    `Status page: http://localhost:${(await loadConfig(join(projectDir, "config.json"))).statusPage.port}`,
+  );
 }
 
 function newestLog(logDir: string): string | undefined {
@@ -206,6 +209,8 @@ async function status(): Promise<void> {
   state.close();
 
   console.log(`Log:         ${newestLog(resolve(projectDir, config.logDir)) ?? "none yet"}`);
+  if (config.statusPage.enabled)
+    console.log(`Page:        http://localhost:${config.statusPage.port}`);
 }
 
 async function testNotify(): Promise<void> {

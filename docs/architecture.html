@@ -205,7 +205,7 @@ td code{white-space:nowrap}
         <li>Your own review prompt, which replaces <code>/caveman-review</code></li>
         <li>Per-repo rules (skip docs-only PRs, size limits)</li>
         <li>An approval step before posting</li>
-        <li>A local status page at <code>localhost:4777</code></li>
+        <li>A local status page at <code>localhost:4777</code> (done in M5)</li>
         <li>Webhooks through a tunnel instead of polling</li>
       </ul>
     </div>
@@ -583,7 +583,7 @@ End with one JSON block and nothing after it:
     <div class="m"><div class="t">M2 · Review offline<small>done</small></div><p>Workspace plus the Agent SDK reviewer (read-only tools, no repo settings loaded, structured output). Write findings to <code>reviews/</code> and post nothing.</p><div class="done">Done when: a real PR produces valid findings JSON you agree with.</div></div>
     <div class="m"><div class="t">M3 · Publish<small>done</small></div><p>Formatter, diff-line mapping and publisher. Test on a sandbox repo first.</p><div class="done">Done when: a Request changes review with inline comments appears on a test PR.</div></div>
     <div class="m"><div class="t">M4 · Run unattended<small>done</small></div><p>Task Scheduler, retries, timeouts, desktop notifications, startup auth check.</p><div class="done">Done when: it survives a reboot and handles a failed run on its own.</div></div>
-    <div class="m"><div class="t">M5 · Make it yours<small>ongoing</small></div><p>Replace <code>/caveman-review</code> with your prompt and add the local status page.</p></div>
+    <div class="m"><div class="t">M5 · Status page<small>done</small></div><p>A page at <code>http://localhost:4777</code> with recent PRs, their findings, and Retry, Re-review, Review now and Pause posting buttons. The review prompt stays <code>/caveman-review</code>.</p></div>
   </div>
 </section>
 

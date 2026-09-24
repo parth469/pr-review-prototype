@@ -10,8 +10,10 @@ import { pollOnce, startPolling } from "./poller.ts";
 import { PreflightError, runPreflight } from "./preflight.ts";
 import { createPublisher } from "./publisher.ts";
 import { createReviewer, resolvePluginPath } from "./reviewer.ts";
+import { createRuntime, isPostingPaused, recordPoll } from "./runtime.ts";
 import { openState } from "./state.ts";
 import { EXIT_PREFLIGHT } from "./supervisor.ts";
+import { startStatusServer } from "./web/server.ts";
 import { createWorker } from "./worker.ts";
 import { createWorkspace } from "./workspace.ts";
 
@@ -91,12 +93,22 @@ try {
     config,
     log,
     pluginPath: getPluginPath,
+    isPostingPaused: () => isPostingPaused(state),
     onEvent: (event) => {
       const wanted = event.type === "posted" ? config.notify.onPosted : config.notify.onFailed;
       if (wanted) void notifier.notify(notificationFor(event));
     },
   });
-  const deps = { github, state, config, viewer, log, onQueued: () => worker.kick() };
+  const runtime = createRuntime(viewer);
+  const deps = {
+    github,
+    state,
+    config,
+    viewer,
+    log,
+    onQueued: () => worker.kick(),
+    onPolled: (result: Parameters<typeof recordPoll>[1]) => recordPoll(runtime, result),
+  };
   const { signal } = controller;
 
   log.info(
@@ -141,10 +153,14 @@ try {
       log.info({ processed: await worker.drain(signal) }, "queue drained");
     }
   } else {
+    const page = config.statusPage.enabled
+      ? await startStatusServer({ state, config, runtime, worker, log })
+      : undefined;
     await Promise.all([
       startPolling(deps, signal),
       config.review.enabled ? worker.start(signal) : Promise.resolve(),
     ]);
+    await page?.close();
   }
   state.close();
 } catch (err) {

@@ -2,7 +2,7 @@
 
 A local background process that finds GitHub PRs where you are a requested reviewer, has Claude review them, and posts the review under your account. Architecture: [`docs/architecture.html`](docs/architecture.html).
 
-**Status: M4 (runs unattended).** It finds review requests, checks out each PR, has Claude review it, and posts the review to the PR under your account: a summary plus one inline comment per finding.
+**Status: M5 (status page).** It finds review requests, checks out each PR, has Claude review it, and posts the review to the PR under your account: a summary plus one inline comment per finding.
 
 ## Requirements
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
@@ -33,6 +33,18 @@ npm run service -- test-notify  # show a sample desktop notification
 - **Notifications.** A Windows notification appears when a review is posted ("Requested changes · owner/repo#12") or when a job fails for good. Click it to open the PR.
 - **Logs.** `logs/proxy-reviewer.<date>.N.log` (server) and `logs/supervisor.<date>.N.log`, rotated daily or at 10 MB, keeping the last 7.
 - **Sleep.** Nothing runs while the PC sleeps. On wake the next poll picks up whatever is waiting.
+
+## Status page
+Open **http://localhost:4777** while the server runs. It lists recent PRs with their status, findings, cost and a link to the posted review, and refreshes every 5 s. Click a row to read the full review.
+
+| Button | Shown for | What it does |
+|---|---|---|
+| **Retry** | failed | Tries again. A saved review is only posted, not re-run. |
+| **Re-review** | posted, waiting, failed | Runs Claude again on the same commit. If a review of that commit is already on GitHub, it is not posted twice. An older commit of a PR that has moved on is marked superseded. |
+| **Review now** | skipped | Reviews it anyway, ignoring the skip rule (draft, too large...). |
+| **Pause posting / Resume** | header | While paused, reviews still run and wait unposted. Resume posts them. Survives restarts. |
+
+It listens on 127.0.0.1 only. Buttons need a secret token that is only in the page, and requests for other host names are refused, so other websites open in your browser can't press them. Turn it off or move it with `statusPage.enabled` and `statusPage.port`.
 
 ## Commands
 | Command | What it does |
@@ -71,6 +83,8 @@ npm run service -- test-notify  # show a sample desktop notification
 | `review.keepWorktree` | `false` | Keep the checkout for debugging |
 | `gitTimeoutSec` | `300` | Kill a git command (and its helpers) that runs longer than this |
 | `logDir` | `logs` | Where log files go |
+| `statusPage.enabled` | `true` | Serve the status page |
+| `statusPage.port` | `4777` | Its port (on 127.0.0.1) |
 | `notify.enabled` | `true` | Desktop notifications on/off |
 | `notify.onPosted` | `true` | Notify when a review is posted |
 | `notify.onFailed` | `true` | Notify when a job gives up after its last attempt |
@@ -131,6 +145,9 @@ src/lock.ts       single-instance lock
 src/notify.ts     Windows desktop notifications
 src/supervisor.ts restarts the server with backoff
 src/service.ts    Task Scheduler install / start / stop / status
+src/runtime.ts    live facts for the page (last poll, pause setting)
+src/web/server.ts status page HTTP server and API
+src/web/page.ts   status page HTML
 prompts/review.md review prompt
 test/             vitest tests
 ```
