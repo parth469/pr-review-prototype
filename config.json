@@ -1,9 +1,27 @@
 {
   "pollIntervalSec": 60,
-  "repos": { "allow": ["*"], "deny": [] },
+  "repos": {
+    "allow": ["*"],
+    "deny": []
+  },
   "skipDrafts": true,
   "skipOwnPrs": true,
   "maxChangedLines": 3000,
   "dataDir": "data",
-  "logLevel": "info"
+  "logLevel": "info",
+  "cacheDir": "cache",
+  "workDir": "work",
+  "reviewsDir": "reviews",
+  "review": {
+    "enabled": true,
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "skill": "caveman:caveman-review",
+    "promptFile": "prompts/review.md",
+    "pluginPath": null,
+    "timeoutMin": 20,
+    "maxTurns": 80,
+    "maxAttempts": 3,
+    "keepWorktree": false
+  }
 }

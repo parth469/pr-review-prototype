@@ -7,6 +7,7 @@ export type JobStatus =
   | "queued"
   | "preparing"
   | "reviewing"
+  | "reviewed"
   | "posting"
   | "done"
   | "failed"
@@ -25,6 +26,11 @@ export interface Job {
   review_id: number | null;
   findings: number | null;
   error: string | null;
+  next_attempt_at: string | null;
+  started_at: string | null;
+  output_dir: string | null;
+  cost_usd: number | null;
+  duration_ms: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +46,16 @@ export interface SeenInput {
 
 /** new: first time this commit is seen · requeued: was skipped, now eligible · known: no change */
 export type SeenResult = "new" | "requeued" | "known";
+
+export interface ReviewOutcome {
+  findings: number;
+  outputDir: string;
+  costUsd: number;
+  durationMs: number;
+}
+
+// Wait before retry N (1-based). Past the end, the last value repeats.
+const RETRY_DELAYS_MS = [5 * 60_000, 20 * 60_000];
 
 // Each entry upgrades the schema by one version. Append only; never edit a released step.
 const MIGRATIONS: string[] = [
@@ -61,6 +77,11 @@ const MIGRATIONS: string[] = [
      UNIQUE (repo, pr, head_sha)
    );
    CREATE INDEX jobs_status ON jobs (status);`,
+  `ALTER TABLE jobs ADD COLUMN next_attempt_at TEXT;
+   ALTER TABLE jobs ADD COLUMN started_at TEXT;
+   ALTER TABLE jobs ADD COLUMN output_dir TEXT;
+   ALTER TABLE jobs ADD COLUMN cost_usd REAL;
+   ALTER TABLE jobs ADD COLUMN duration_ms INTEGER;`,
 ];
 
 function migrate(db: DatabaseSync): void {
@@ -80,6 +101,20 @@ function migrate(db: DatabaseSync): void {
 
 export interface State {
   recordSeen(input: SeenInput): SeenResult;
+  /** Queue a PR commit by hand, ignoring skip rules. Resets a finished or failed job. */
+  enqueue(input: Omit<SeenInput, "decision">): Job;
+  /** Atomically move the oldest ready job from queued to preparing. */
+  claimNext(now?: Date): Job | undefined;
+  /** Claim one specific queued job, ignoring its retry time. */
+  claimById(id: number): Job | undefined;
+  setStatus(id: number, status: JobStatus): void;
+  skip(id: number, reason: string): void;
+  completeReview(id: number, outcome: ReviewOutcome): void;
+  /** Record a failed attempt; requeue with backoff, or mark failed after maxAttempts. */
+  failAttempt(id: number, error: string, maxAttempts: number, now?: Date): Job;
+  /** Put jobs left mid-flight by a crash back in the queue. Returns how many. */
+  recoverStale(): number;
+  get(id: number): Job | undefined;
   listByStatus(status: JobStatus): Job[];
   close(): void;
 }
@@ -91,29 +126,71 @@ export function openState(path: string): State {
   db.exec("PRAGMA busy_timeout = 5000");
   migrate(db);
 
-  const findJob = db.prepare(
-    "SELECT status, reason FROM jobs WHERE repo = ? AND pr = ? AND head_sha = ?",
-  );
+  const findJob = db.prepare("SELECT * FROM jobs WHERE repo = ? AND pr = ? AND head_sha = ?");
+  const getJob = db.prepare("SELECT * FROM jobs WHERE id = ?");
   const insertJob = db.prepare(
     `INSERT INTO jobs (repo, pr, head_sha, title, url, status, reason, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  const updateStatus = db.prepare(
+  const updateSeen = db.prepare(
     `UPDATE jobs SET status = ?, reason = ?, title = ?, updated_at = ?
      WHERE repo = ? AND pr = ? AND head_sha = ?`,
   );
+  const supersede = db.prepare(
+    `UPDATE jobs SET status = 'skipped', reason = 'superseded', updated_at = ?
+     WHERE repo = ? AND pr = ? AND head_sha <> ? AND status = 'queued'`,
+  );
+  const requeueManual = db.prepare(
+    `UPDATE jobs SET status = 'queued', reason = NULL, error = NULL, attempts = 0,
+       next_attempt_at = NULL, title = ?, updated_at = ?
+     WHERE id = ?`,
+  );
+  const claim = db.prepare(
+    `UPDATE jobs SET status = 'preparing', started_at = ?, updated_at = ?
+     WHERE id = (
+       SELECT id FROM jobs
+       WHERE status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+       ORDER BY id LIMIT 1
+     )
+     RETURNING *`,
+  );
+  const claimOne = db.prepare(
+    `UPDATE jobs SET status = 'preparing', started_at = ?, updated_at = ?
+     WHERE id = ? AND status = 'queued'
+     RETURNING *`,
+  );
+  const setStatusStmt = db.prepare("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?");
+  const skipStmt = db.prepare(
+    "UPDATE jobs SET status = 'skipped', reason = ?, updated_at = ? WHERE id = ?",
+  );
+  const complete = db.prepare(
+    `UPDATE jobs SET status = 'reviewed', findings = ?, output_dir = ?, cost_usd = ?,
+       duration_ms = ?, error = NULL, updated_at = ?
+     WHERE id = ?`,
+  );
+  const fail = db.prepare(
+    `UPDATE jobs SET status = ?, attempts = ?, error = ?, next_attempt_at = ?, updated_at = ?
+     WHERE id = ?`,
+  );
+  const recover = db.prepare(
+    `UPDATE jobs SET status = 'queued', updated_at = ?
+     WHERE status IN ('preparing', 'reviewing')`,
+  );
   const selectByStatus = db.prepare("SELECT * FROM jobs WHERE status = ? ORDER BY id");
+
+  const toJob = (row: unknown) => row as Job | undefined;
+  const iso = (d: Date = new Date()) => d.toISOString();
 
   return {
     recordSeen({ repo, pr, headSha, title, url, decision }) {
-      const now = new Date().toISOString();
+      const now = iso();
       const status: JobStatus = decision.action === "queue" ? "queued" : "skipped";
       const reason = decision.action === "skip" ? decision.reason : null;
-      const existing = findJob.get(repo, pr, headSha) as
-        | { status: JobStatus; reason: string | null }
-        | undefined;
+      const existing = toJob(findJob.get(repo, pr, headSha));
 
       if (!existing) {
+        // A new push makes any older commit of this PR that is still waiting pointless.
+        supersede.run(now, repo, pr, headSha);
         insertJob.run(repo, pr, headSha, title, url, status, reason, now, now);
         return "new";
       }
@@ -121,13 +198,66 @@ export function openState(path: string): State {
 
       // Only skipped jobs are re-evaluated: a draft can become ready, config can change.
       if (status === "queued") {
-        updateStatus.run(status, null, title, now, repo, pr, headSha);
+        updateSeen.run(status, null, title, now, repo, pr, headSha);
         return "requeued";
       }
       if (reason !== existing.reason) {
-        updateStatus.run(status, reason, title, now, repo, pr, headSha);
+        updateSeen.run(status, reason, title, now, repo, pr, headSha);
       }
       return "known";
+    },
+
+    enqueue({ repo, pr, headSha, title, url }) {
+      const now = iso();
+      const existing = toJob(findJob.get(repo, pr, headSha));
+      if (!existing) {
+        supersede.run(now, repo, pr, headSha);
+        insertJob.run(repo, pr, headSha, title, url, "queued", null, now, now);
+      } else if (existing.status !== "preparing" && existing.status !== "reviewing") {
+        requeueManual.run(title, now, existing.id);
+      }
+      return toJob(findJob.get(repo, pr, headSha)) as Job;
+    },
+
+    claimNext(now = new Date()) {
+      const t = iso(now);
+      return toJob(claim.get(t, t, t));
+    },
+
+    claimById(id) {
+      const t = iso();
+      return toJob(claimOne.get(t, t, id));
+    },
+
+    setStatus(id, status) {
+      setStatusStmt.run(status, iso(), id);
+    },
+
+    skip(id, reason) {
+      skipStmt.run(reason, iso(), id);
+    },
+
+    completeReview(id, { findings, outputDir, costUsd, durationMs }) {
+      complete.run(findings, outputDir, costUsd, durationMs, iso(), id);
+    },
+
+    failAttempt(id, error, maxAttempts, now = new Date()) {
+      const job = toJob(getJob.get(id));
+      if (!job) throw new Error(`Job ${id} not found`);
+      const attempts = job.attempts + 1;
+      const giveUp = attempts >= maxAttempts;
+      const delay = RETRY_DELAYS_MS[Math.min(attempts, RETRY_DELAYS_MS.length) - 1] ?? 0;
+      const nextAt = giveUp ? null : iso(new Date(now.getTime() + delay));
+      fail.run(giveUp ? "failed" : "queued", attempts, error, nextAt, iso(now), id);
+      return toJob(getJob.get(id)) as Job;
+    },
+
+    recoverStale() {
+      return Number(recover.run(iso()).changes);
+    },
+
+    get(id) {
+      return toJob(getJob.get(id));
     },
 
     listByStatus(status) {

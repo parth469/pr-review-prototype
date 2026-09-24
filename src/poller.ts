@@ -11,6 +11,8 @@ export interface PollDeps {
   config: Config;
   viewer: string;
   log: Logger;
+  /** Called after a poll that queued work, so the worker can start at once. */
+  onQueued?: () => void;
 }
 
 export interface PollSummary {
@@ -23,13 +25,8 @@ export interface PollSummary {
 
 const MAX_BACKOFF_MS = 5 * 60_000;
 
-export async function pollOnce({
-  github,
-  state,
-  config,
-  viewer,
-  log,
-}: PollDeps): Promise<PollSummary> {
+export async function pollOnce(deps: PollDeps): Promise<PollSummary> {
+  const { github, state, config, viewer, log } = deps;
   const requests = await github.searchReviewRequests();
   const summary: PollSummary = {
     found: requests.length,
@@ -75,6 +72,7 @@ export async function pollOnce({
       log.error({ err, repo, pr: number }, "failed to process PR");
     }
   }
+  if (summary.queued > 0) deps.onQueued?.();
   return summary;
 }
 

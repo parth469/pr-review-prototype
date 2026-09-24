@@ -6,3 +6,4 @@ work/
 reviews/
 .env
 *.log
+*.stackdump

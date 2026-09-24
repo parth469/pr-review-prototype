@@ -13,8 +13,32 @@ describe("config", () => {
       skipOwnPrs: true,
       maxChangedLines: 3000,
       dataDir: "data",
+      cacheDir: "cache",
+      workDir: "work",
+      reviewsDir: "reviews",
       logLevel: "info",
+      review: {
+        enabled: true,
+        model: "claude-opus-5-5",
+        effort: "high",
+        skill: "caveman:caveman-review",
+        promptFile: "prompts/review.md",
+        pluginPath: null,
+        timeoutMin: 20,
+        maxTurns: 80,
+        maxAttempts: 3,
+        keepWorktree: false,
+      },
     });
+  });
+
+  it("keeps review defaults when only some review fields are set", () => {
+    const config = parseConfig({ review: { effort: "max" } });
+    expect(config.review).toMatchObject({ effort: "max", model: "claude-opus-5-5" });
+  });
+
+  it("matches the committed config.json", async () => {
+    expect(await loadConfig("config.json")).toEqual(parseConfig({}));
   });
 
   it("rejects bad repo patterns and short intervals", () => {

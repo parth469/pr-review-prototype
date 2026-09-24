@@ -572,11 +572,11 @@ End with one JSON block and nothing after it:
   <h2><span class="n">11</span>Build plan</h2>
   <p class="sub">Each step can be tested alone before the next one starts.</p>
   <div class="ms">
-    <div class="m"><div class="t">M1 · Detect<small>~half a day</small></div><p>Poller, config and <code>state.db</code>. Log each PR waiting on your review.</p><div class="done">Done when: requesting your review on a test PR prints it within 60 seconds, once.</div></div>
-    <div class="m"><div class="t">M2 · Review offline<small>~1 day</small></div><p>Workspace plus the CLI reviewer. Write findings to <code>reviews/</code> and post nothing.</p><div class="done">Done when: a real PR produces valid findings JSON you agree with.</div></div>
+    <div class="m"><div class="t">M1 · Detect<small>done</small></div><p>Poller, config and <code>state.db</code>. Log each PR waiting on your review.</p><div class="done">Done when: requesting your review on a test PR prints it within 60 seconds, once.</div></div>
+    <div class="m"><div class="t">M2 · Review offline<small>done</small></div><p>Workspace plus the Agent SDK reviewer (read-only tools, no repo settings loaded, structured output). Write findings to <code>reviews/</code> and post nothing.</p><div class="done">Done when: a real PR produces valid findings JSON you agree with.</div></div>
     <div class="m"><div class="t">M3 · Publish<small>~1 day</small></div><p>Formatter, diff-line mapping and publisher. Test on a sandbox repo first.</p><div class="done">Done when: a Request changes review with inline comments appears on a test PR.</div></div>
     <div class="m"><div class="t">M4 · Run unattended<small>~half a day</small></div><p>Task Scheduler, retries, timeouts, desktop notifications, startup auth check.</p><div class="done">Done when: it survives a reboot and handles a failed run on its own.</div></div>
-    <div class="m"><div class="t">M5 · Make it yours<small>ongoing</small></div><p>Replace <code>/caveman-review</code> with your prompt, move to the Agent SDK with structured output, and add the local status page.</p></div>
+    <div class="m"><div class="t">M5 · Make it yours<small>ongoing</small></div><p>Replace <code>/caveman-review</code> with your prompt and add the local status page.</p></div>
   </div>
 </section>
 
