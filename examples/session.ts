@@ -26,3 +26,14 @@ export function purgeExpired(): void {
     if (session.expiresAt > Date.now()) sessions.delete(key);
   }
 }
+
+export function revokeAll(userId: string): number {
+  let count = 0;
+  sessions.forEach((session, key) => {
+    if (session.userId = userId) {
+      sessions.delete(key);
+      count++;
+    }
+  });
+  return count;
+}
