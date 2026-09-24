@@ -1,0 +1,598 @@
+<title>Proxy Reviewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root{
+  --ground:#F3F5F7;
+  --surface:#FFFFFF;
+  --sunken:#E8ECF0;
+  --ink:#16202B;
+  --ink-2:#4A5866;
+  --ink-3:#7A8794;
+  --rule:#D5DCE3;
+  --accent:#1F5F8B;
+  --accent-soft:#DCE9F3;
+  --change:#B8401E;
+  --change-soft:#F8E3DA;
+  --ok:#2F7A4A;
+  --ok-soft:#DDEFE3;
+  --warn:#9A6B00;
+  --warn-soft:#F6ECD2;
+  --code-bg:#0F1720;
+  --code-ink:#D8E1EA;
+  --code-dim:#7F90A0;
+  --code-key:#8CC4F0;
+  --code-str:#E7B98A;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --cond:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0E141A;--surface:#151D25;--sunken:#1C2630;
+    --ink:#E4EAF0;--ink-2:#A9B6C2;--ink-3:#76858F;--rule:#2A3642;
+    --accent:#72AEDB;--accent-soft:#1A3043;
+    --change:#F08A62;--change-soft:#3A1F16;
+    --ok:#6CC08A;--ok-soft:#16301F;
+    --warn:#E0B24A;--warn-soft:#352A10;
+    --code-bg:#0A0F14;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0E141A;--surface:#151D25;--sunken:#1C2630;
+  --ink:#E4EAF0;--ink-2:#A9B6C2;--ink-3:#76858F;--rule:#2A3642;
+  --accent:#72AEDB;--accent-soft:#1A3043;
+  --change:#F08A62;--change-soft:#3A1F16;
+  --ok:#6CC08A;--ok-soft:#16301F;
+  --warn:#E0B24A;--warn-soft:#352A10;
+  --code-bg:#0A0F14;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;padding-inline:16px;padding-block:0 64px}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shell{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px}
+@media (max-width:880px){.shell{grid-template-columns:minmax(0,1fr);gap:0}.toc{display:none}}
+.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 32px);align-self:start;padding-top:40px;font-size:14px}
+.toc p{font-family:var(--cond);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--ink-3);margin:0 0 12px}
+.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;counter-reset:t}
+.toc li{counter-increment:t}
+.toc a{color:var(--ink-2);text-decoration:none;display:flex;gap:10px}
+.toc a::before{content:counter(t,decimal-leading-zero);font-family:var(--mono);font-size:12px;color:var(--ink-3);padding-top:2px}
+.toc a:hover{color:var(--accent)}
+main{min-width:0}
+header.top{padding-block:40px 32px;border-bottom:1px solid var(--rule)}
+.eyebrow{font-family:var(--mono);font-size:13px;color:var(--ink-3);margin:0 0 12px}
+h1{font-family:var(--cond);font-weight:700;font-size:clamp(34px,5vw,48px);line-height:1.08;margin:0 0 16px;letter-spacing:-.01em;text-wrap:balance}
+.lede{font-size:18px;color:var(--ink-2);max-width:64ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font-family:var(--mono);font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--sunken);color:var(--ink-2);border:1px solid var(--rule)}
+.chip.change{background:var(--change-soft);color:var(--change);border-color:transparent}
+.chip.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+section{padding-block:40px 8px}
+h2{font-family:var(--cond);font-weight:600;font-size:28px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-weight:400;font-size:15px;color:var(--ink-3);margin-right:10px;vertical-align:3px}
+h3{font-family:var(--cond);font-weight:600;font-size:19px;margin:28px 0 8px}
+p,li{max-width:68ch}
+.sub{color:var(--ink-2);margin:0 0 20px}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunken);padding:1px 5px;border-radius:4px}
+pre.code{background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:13.5px;line-height:1.55;padding:18px 20px;border-radius:8px;overflow-x:auto;margin:12px 0 20px}
+pre.code .c{color:var(--code-dim)}
+pre.code .k{color:var(--code-key)}
+pre.code .s{color:var(--code-str)}
+.diagram{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:20px;overflow-x:auto;margin:16px 0 8px}
+.diagram pre.mermaid{margin:0;background:transparent;text-align:center}
+.cap{font-size:13.5px;color:var(--ink-3);margin:0 0 16px}
+
+/* pipeline stages */
+.stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:20px 0}
+.stage{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:6px}
+.stage .id{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.stage b{font-family:var(--cond);font-size:17px;font-weight:600}
+.stage span{font-size:14px;color:var(--ink-2);line-height:1.5}
+.stage .file{font-family:var(--mono);font-size:12px;color:var(--accent);margin-top:auto;padding-top:6px}
+
+/* tables */
+.tablewrap{overflow-x:auto;margin:12px 0 20px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:560px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--cond);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);background:var(--sunken)}
+tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+
+/* github review mock */
+.gh{background:var(--surface);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:16px 0 8px}
+.gh-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule);background:var(--sunken);flex-wrap:wrap}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--surface);display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:500;flex:none}
+.gh-head .who{font-weight:600}
+.gh-head .what{color:var(--ink-2)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:2px 10px;border-radius:999px;background:var(--change-soft);color:var(--change)}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--change)}
+.gh-body{padding:16px 18px;font-size:14.5px}
+.gh-body h4{margin:0 0 8px;font-size:15px}
+.gh-body ul{margin:0 0 12px;padding-left:20px}
+.gh-body li{margin:2px 0}
+.sev{font-family:var(--mono);font-size:11.5px;padding:1px 6px;border-radius:4px;margin-right:6px;font-weight:500}
+.sev.hi{background:var(--change-soft);color:var(--change)}
+.sev.md{background:var(--warn-soft);color:var(--warn)}
+.sev.lo{background:var(--accent-soft);color:var(--accent)}
+.thread{border-top:1px solid var(--rule)}
+.thread .path{font-family:var(--mono);font-size:12.5px;padding:8px 16px;background:var(--sunken);color:var(--ink-2);border-bottom:1px solid var(--rule)}
+.diffline{font-family:var(--mono);font-size:12.5px;display:grid;grid-template-columns:44px 1fr;overflow-x:auto}
+.diffline .ln{color:var(--ink-3);text-align:right;padding:2px 10px 2px 0;border-right:1px solid var(--rule);font-variant-numeric:tabular-nums}
+.diffline .tx{padding:2px 12px;white-space:pre}
+.diffline.add .tx{background:var(--ok-soft)}
+.comment{padding:12px 16px;display:flex;gap:10px;font-size:14px;border-top:1px solid var(--rule)}
+.comment p{margin:0}
+.foot{font-size:12.5px;color:var(--ink-3);padding:10px 18px;border-top:1px solid var(--rule)}
+
+/* milestones */
+.ms{display:flex;flex-direction:column;gap:0;margin:16px 0;border-left:2px solid var(--rule);padding-left:0}
+.m{position:relative;padding:0 0 22px 24px}
+.m::before{content:"";position:absolute;left:-7px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--accent)}
+.m .t{font-family:var(--cond);font-weight:600;font-size:18px}
+.m .t small{font-family:var(--mono);font-weight:400;font-size:12.5px;color:var(--ink-3);margin-left:8px}
+.m p{margin:4px 0 0;color:var(--ink-2);font-size:15px}
+.m .done{font-size:13.5px;color:var(--ink-3);margin-top:4px}
+
+.callout{border:1px solid var(--rule);border-left:3px solid var(--warn);background:var(--surface);padding:14px 18px;border-radius:0 8px 8px 0;margin:16px 0;font-size:15px}
+.callout.risk{border-left-color:var(--change)}
+.callout b{font-family:var(--cond);font-weight:600}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.box{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:16px 18px}
+.box h3{margin-top:0}
+.box ul{margin:0;padding-left:18px;font-size:15px}
+.box li{margin:4px 0}
+.tree{font-family:var(--mono);font-size:13.5px;line-height:1.7;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:16px 20px;overflow-x:auto;white-space:pre;margin:12px 0 20px}
+.tree .d{color:var(--ink-3)}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#goal">Goal</a></li>
+    <li><a href="#overview">System overview</a></li>
+    <li><a href="#flow">Review lifecycle</a></li>
+    <li><a href="#components">Components</a></li>
+    <li><a href="#claude">Running Claude</a></li>
+    <li><a href="#posting">Posting the review</a></li>
+    <li><a href="#state">State and dedupe</a></li>
+    <li><a href="#config">Language and layout</a></li>
+    <li><a href="#background">Running in background</a></li>
+    <li><a href="#safety">Safety</a></li>
+    <li><a href="#milestones">Build plan</a></li>
+    <li><a href="#open">Open decisions</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">reivew-prototype / architecture v0.1 · 2026-09-24</p>
+  <h1>Proxy Reviewer: a local daemon that reviews PRs assigned to you</h1>
+  <p class="lede">When someone requests your review on GitHub, a background process on your machine picks up the PR, checks out the code, has Claude run <code>/caveman-review</code> on it, and posts the result to the PR under your account as <b>Request changes</b> with a summary and inline comments.</p>
+  <div class="meta">
+    <span class="chip accent">claude-opus-5-5 · effort high</span>
+    <span class="chip">/caveman-review (placeholder prompt)</span>
+    <span class="chip change">event: REQUEST_CHANGES</span>
+    <span class="chip">localhost only · Windows 11</span>
+    <span class="chip">TypeScript on Node.js + gh CLI</span>
+  </div>
+</header>
+
+<section id="goal">
+  <h2><span class="n">01</span>Goal and scope</h2>
+  <p class="sub">What the prototype does, and what it leaves for later.</p>
+  <div class="two">
+    <div class="box">
+      <h3>In scope</h3>
+      <ul>
+        <li>Detect PRs where you are a requested reviewer</li>
+        <li>Check out the PR head so Claude sees real code, not only the diff</li>
+        <li>Run Claude headless: Opus 5.5, high effort, <code>/caveman-review</code></li>
+        <li>Parse findings into a summary plus inline comments</li>
+        <li>Post one review as <b>Request changes</b> from your GitHub account</li>
+        <li>Never review the same commit twice</li>
+        <li>Run on your machine only, with no public endpoint</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Later</h3>
+      <ul>
+        <li>Your own review prompt, which replaces <code>/caveman-review</code></li>
+        <li>Per-repo rules (skip docs-only PRs, size limits)</li>
+        <li>An approval step before posting</li>
+        <li>A local status page at <code>localhost:4777</code></li>
+        <li>Webhooks through a tunnel instead of polling</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="overview">
+  <h2><span class="n">02</span>System overview</h2>
+  <p class="sub">Everything runs inside one Node process on your PC. It talks outward to GitHub (through <code>gh</code>) and to Claude (through Claude Code). Nothing listens on a public port.</p>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph GH["GitHub"]
+    PR["Pull request\nreview requested: you"]
+    API["REST API\nsearch + pulls/reviews"]
+  end
+  subgraph PC["Your machine (local only)"]
+    direction LR
+    P["Poller\nevery 60s"]
+    Q["Job queue\n1 at a time"]
+    W["Workspace\ngit worktree @ head SHA"]
+    R["Reviewer\nClaude Code headless\nopus-5-5 · high"]
+    F["Formatter\nfindings to review JSON"]
+    PUB["Publisher\nREQUEST_CHANGES"]
+    DB[("state.db\nSQLite")]
+    LOG["logs/ + reviews/\nraw output archive"]
+  end
+  PR --> API
+  P -- "gh api search" --> API
+  P --> Q
+  Q --> W --> R --> F --> PUB
+  PUB -- "gh api POST review" --> API
+  Q <--> DB
+  PUB --> DB
+  R --> LOG
+</pre>
+  </div>
+  <p class="cap">Polling keeps the server local: GitHub never has to reach your machine.</p>
+
+  <div class="stages">
+    <div class="stage"><span class="id">stage 1</span><b>Detect</b><span>Search GitHub for open PRs that request your review directly.</span><span class="file">src/poller.ts</span></div>
+    <div class="stage"><span class="id">stage 2</span><b>Prepare</b><span>Fetch the PR head into a clean worktree and save the diff and metadata.</span><span class="file">src/workspace.ts</span></div>
+    <div class="stage"><span class="id">stage 3</span><b>Review</b><span>Run Claude in that folder with read-only tools and the review prompt.</span><span class="file">src/reviewer.ts</span></div>
+    <div class="stage"><span class="id">stage 4</span><b>Format</b><span>Validate the JSON findings and map each one to a line in the diff.</span><span class="file">src/formatter.ts</span></div>
+    <div class="stage"><span class="id">stage 5</span><b>Publish</b><span>Post one review with a summary body and inline comments.</span><span class="file">src/publisher.ts</span></div>
+  </div>
+</section>
+
+<section id="flow">
+  <h2><span class="n">03</span>Review lifecycle</h2>
+  <p class="sub">One PR from request to posted review.</p>
+  <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor A as PR author
+  participant G as GitHub
+  participant P as Poller
+  participant S as state.db
+  participant W as Workspace
+  participant C as Claude Code
+  participant U as Publisher
+  A->>G: Requests review from you
+  loop every 60s
+    P->>G: search user-review-requested:@me
+    G-->>P: open PRs + head SHA
+  end
+  P->>S: already seen (repo, pr, sha)?
+  S-->>P: no, enqueue
+  P->>W: prepare job
+  W->>G: git fetch pull/N/head, gh pr diff
+  W-->>C: worktree path + diff.patch + pr.json
+  C->>C: /caveman-review (opus-5-5, high)
+  C-->>U: findings JSON
+  U->>U: map findings to diff lines
+  U->>G: POST /pulls/N/reviews event=REQUEST_CHANGES
+  G-->>A: "You requested changes"
+  U->>S: mark done (sha, review id)
+</pre>
+  </div>
+  <h3>Job states</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>State</th><th>Meaning</th><th>Next</th></tr></thead>
+    <tbody>
+      <tr><td><code>queued</code></td><td>New PR or new head SHA found</td><td>preparing</td></tr>
+      <tr><td><code>preparing</code></td><td>Fetching code and diff</td><td>reviewing, or failed</td></tr>
+      <tr><td><code>reviewing</code></td><td>Claude is running (timeout 20 min)</td><td>posting, or failed</td></tr>
+      <tr><td><code>posting</code></td><td>Sending the review to GitHub</td><td>done, or failed</td></tr>
+      <tr><td><code>done</code></td><td>Review posted, review id stored</td><td>queued again if a new SHA is pushed and you are re-requested</td></tr>
+      <tr><td><code>failed</code></td><td>Error saved in the log; retried up to 2 times with backoff</td><td>queued, or stays failed with a desktop notification</td></tr>
+      <tr><td><code>skipped</code></td><td>Draft PR, too large, or repo not in the allowlist</td><td>none</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="components">
+  <h2><span class="n">04</span>Components</h2>
+
+  <h3>Poller</h3>
+  <p>Polling is the simplest option that needs no public URL. A request every 60 seconds uses about 60 of your 5,000 hourly API calls.</p>
+<pre class="code"><span class="c"># direct requests only (user-, not team-level)</span>
+gh api -X GET search/issues \
+  -f q=<span class="s">"is:pr is:open user-review-requested:@me archived:false"</span> \
+  --jq <span class="s">'.items[] | {repo: .repository_url, number, title, draft}'</span>
+
+<span class="c"># then per PR, get the head SHA</span>
+gh pr view 128 -R acme/api --json headRefOid,baseRefName,isDraft,additions,deletions</pre>
+  <p>Use <code>user-review-requested</code> rather than <code>review-requested</code>. The second also matches requests sent to a team you belong to, which would review far more PRs than you intend.</p>
+
+  <h3>Workspace</h3>
+  <p>Claude reviews better with the whole repo available, so it can open callers, types and tests. Keep one partial clone per repo and add a fresh worktree for each job.</p>
+<pre class="code"><span class="c"># once per repo</span>
+git clone --filter=blob:none https://github.com/acme/api cache/repos/acme/api
+
+<span class="c"># per job</span>
+git -C cache/repos/acme/api fetch origin pull/128/head base-branch
+git -C cache/repos/acme/api worktree add ../../work/acme-api-128-3f9c2e1 3f9c2e1
+gh pr diff 128 -R acme/api &gt; work/acme-api-128-3f9c2e1/.review/diff.patch
+gh pr view 128 -R acme/api --json title,body,author,files &gt; .../.review/pr.json</pre>
+  <p>Delete the worktree after posting. Keep <code>.review/</code> output in <code>reviews/</code> so you can audit what was posted.</p>
+
+  <h3>Queue</h3>
+  <p>An in-process queue with a concurrency of 1. Opus at high effort on a large PR can run 5 to 15 minutes, and running several at once only adds cost and rate-limit risk. The queue is backed by <code>state.db</code>, so jobs survive a restart.</p>
+</section>
+
+<section id="claude">
+  <h2><span class="n">05</span>Running Claude</h2>
+  <p class="sub">Two ways to call it. Both use your existing Claude Code login and plugins, so <code>/caveman-review</code> resolves the same way it does in your terminal.</p>
+
+  <div class="two">
+    <div class="box">
+      <h3>A. Claude Agent SDK (recommended)</h3>
+      <ul>
+        <li><code>@anthropic-ai/claude-agent-sdk</code>, called with <code>query()</code> from Node</li>
+        <li>Set model, allowed tools, working directory and timeout in code</li>
+        <li>Structured JSON output against a schema, so no text parsing</li>
+        <li>Streams progress events you can log</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>B. CLI subprocess</h3>
+      <ul>
+        <li><code>claude -p</code> spawned with <code>child_process</code></li>
+        <li>Fewest moving parts, easy to test by hand first</li>
+        <li>Findings come back as text, which you parse out of a fenced JSON block</li>
+        <li>Good for milestone 2, then move to the SDK</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>CLI form (for testing by hand)</h3>
+<pre class="code">cd work/acme-api-128-3f9c2e1
+claude -p <span class="s">"$(cat ../../prompts/review.md)"</span> \
+  --model claude-opus-5-5 \
+  --effort high \
+  --output-format json \
+  --allowedTools <span class="s">"Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"</span> \
+  --disallowedTools <span class="s">"Edit,Write,WebFetch,WebSearch"</span> \
+  &gt; .review/claude.json</pre>
+  <p class="cap">Check the effort flag name with <code>claude --help</code> on your version. If there is no flag, set <code>"effortLevel": "high"</code> in a settings file passed with <code>--settings</code>.</p>
+
+  <h3>Prompt template: <code>prompts/review.md</code></h3>
+  <p>The review instructions are only the first line and can be swapped later. The rest is fixed plumbing that the formatter depends on.</p>
+<pre class="code"><span class="k">/caveman-review</span>
+
+<span class="c"># ---- fixed plumbing below, keep when you swap the prompt ----</span>
+Review PR #{{number}} "{{title}}" in {{repo}}.
+Base: {{base}}  Head: {{sha}}
+The diff is in .review/diff.patch. PR description and file list are in .review/pr.json.
+You may read any file in this repo for context. Do not modify files.
+Only report issues on lines changed in this diff.
+
+End with one JSON block and nothing after it:
+```json
+{ "summary": "2-4 sentences",
+  "verdict": "request_changes" | "no_issues",
+  "findings": [
+    { "path": "src/x.ts", "line": 42, "severity": "high|medium|low",
+      "title": "short", "body": "what is wrong, why, and the fix" } ] }
+```</pre>
+
+  <h3>Finding schema</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Field</th><th>Type</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td><code>path</code></td><td>string</td><td>File path, relative to the repo root</td></tr>
+      <tr><td><code>line</code></td><td>int</td><td>Line in the new version of the file (right side of the diff)</td></tr>
+      <tr><td><code>severity</code></td><td>high · medium · low</td><td>Sort order and label in the summary</td></tr>
+      <tr><td><code>title</code></td><td>string</td><td>First line of the inline comment</td></tr>
+      <tr><td><code>body</code></td><td>markdown</td><td>Explanation and suggested fix</td></tr>
+    </tbody>
+  </table></div>
+  <p>Validate with <code>zod</code>. If parsing fails, resume the same session once with "Reformat your findings as the JSON block only." If that also fails, mark the job <code>failed</code> and save the raw text.</p>
+</section>
+
+<section id="posting">
+  <h2><span class="n">06</span>Posting the review</h2>
+  <p class="sub">One API call creates the review, its body, and all inline comments together. It is authored by whichever account <code>gh</code> is logged in as, which is you.</p>
+<pre class="code">gh api repos/acme/api/pulls/128/reviews --method POST --input review.json
+
+<span class="c"># review.json</span>
+{
+  <span class="k">"commit_id"</span>: <span class="s">"3f9c2e1…"</span>,
+  <span class="k">"event"</span>: <span class="s">"REQUEST_CHANGES"</span>,
+  <span class="k">"body"</span>: <span class="s">"## Review summary\n…"</span>,
+  <span class="k">"comments"</span>: [
+    { <span class="k">"path"</span>: <span class="s">"src/auth/session.ts"</span>, <span class="k">"line"</span>: 58, <span class="k">"side"</span>: <span class="s">"RIGHT"</span>,
+      <span class="k">"body"</span>: <span class="s">"**[high] Token compared with ==** …"</span> }
+  ]
+}</pre>
+
+  <h3>How it will look on the PR</h3>
+  <div class="gh" role="figure" aria-label="Example of the posted GitHub review">
+    <div class="gh-head">
+      <span class="avatar">you</span>
+      <span class="who">you</span>
+      <span class="badge">requested changes</span>
+      <span class="what">on acme/api#128 · 3 comments</span>
+    </div>
+    <div class="gh-body">
+      <h4>Review summary</h4>
+      <p style="margin:0 0 10px">Session refresh logic is mostly sound. The token comparison is timing-unsafe and the refresh path skips the revocation check. One test covers the happy path only.</p>
+      <ul>
+        <li><span class="sev hi">high</span><code>src/auth/session.ts:58</code> token compared with <code>==</code></li>
+        <li><span class="sev md">medium</span><code>src/auth/refresh.ts:21</code> revoked tokens can still refresh</li>
+        <li><span class="sev lo">low</span><code>test/session.test.ts:40</code> no test for expired token</li>
+      </ul>
+    </div>
+    <div class="thread">
+      <div class="path">src/auth/session.ts</div>
+      <div class="diffline add"><span class="ln">57</span><span class="tx">+ const stored = await getToken(userId)</span></div>
+      <div class="diffline add"><span class="ln">58</span><span class="tx">+ if (stored == incoming) return ok()</span></div>
+      <div class="comment">
+        <span class="avatar">you</span>
+        <p><b>[high] Token compared with <code>==</code></b><br>Plain comparison leaks timing and also coerces types. Use <code>crypto.timingSafeEqual</code> on equal-length buffers.</p>
+      </div>
+    </div>
+    <div class="foot">Optional footer, off by default: "Drafted with Claude, reviewed by me."</div>
+  </div>
+
+  <h3>Rules for the publisher</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Case</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td>Finding is on a line inside a diff hunk</td><td>Posted as an inline comment with <code>side: RIGHT</code></td></tr>
+      <tr><td>Finding is on a line outside the diff</td><td>GitHub rejects it (HTTP 422), so it moves into the summary under "Other findings"</td></tr>
+      <tr><td>At least one finding</td><td><code>event: REQUEST_CHANGES</code></td></tr>
+      <tr><td>Zero findings</td><td><code>event: COMMENT</code> with "No blocking issues found". It never auto-approves.</td></tr>
+      <tr><td>PR head moved while reviewing</td><td>Post against the reviewed <code>commit_id</code>. The next poll picks up the new SHA if you are re-requested.</td></tr>
+      <tr><td><code>DRY_RUN=1</code></td><td>Writes <code>review.json</code> and posts nothing</td></tr>
+    </tbody>
+  </table></div>
+  <p>To build the valid-line set, parse the <code>@@ -a,b +c,d @@</code> headers in <code>diff.patch</code> and record every added or context line on the right side for each file.</p>
+</section>
+
+<section id="state">
+  <h2><span class="n">07</span>State and dedupe</h2>
+  <p class="sub">A single SQLite file, <code>data/state.db</code>, using <code>better-sqlite3</code>.</p>
+<pre class="code"><span class="k">CREATE TABLE</span> jobs (
+  id          INTEGER PRIMARY KEY,
+  repo        TEXT NOT NULL,        <span class="c">-- "acme/api"</span>
+  pr          INTEGER NOT NULL,
+  head_sha    TEXT NOT NULL,
+  status      TEXT NOT NULL,        <span class="c">-- queued|preparing|reviewing|posting|done|failed|skipped</span>
+  attempts    INTEGER DEFAULT 0,
+  review_id   INTEGER,              <span class="c">-- GitHub review id once posted</span>
+  findings    INTEGER,
+  error       TEXT,
+  created_at  TEXT, updated_at TEXT,
+  <span class="k">UNIQUE</span>(repo, pr, head_sha)
+);</pre>
+  <p>The unique key <code>(repo, pr, head_sha)</code> is the whole dedupe rule. The same commit is reviewed once. A new push is reviewed only if the PR still asks for your review. After you submit a review GitHub removes you from the request list, so the author has to re-request, which matches normal reviewer behaviour.</p>
+</section>
+
+<section id="config">
+  <h2><span class="n">08</span>Language, config and project layout</h2>
+  <h3>Language: TypeScript on Node.js</h3>
+  <ul>
+    <li>Node, <code>gh</code> and <code>claude</code> are already installed on this machine.</li>
+    <li>The Claude Agent SDK (<code>@anthropic-ai/claude-agent-sdk</code>) has a TypeScript version.</li>
+    <li>Node is simple for JSON and for running command-line tools with <code>child_process</code>.</li>
+    <li>Types catch mistakes in the findings and review data before anything is posted.</li>
+  </ul>
+  <p>Run it with <code>tsx src/index.ts</code> during development. Build with <code>tsc</code> to <code>dist/</code> for the background service.</p>
+<pre class="code"><span class="c">// package.json dependencies</span>
+<span class="k">"@anthropic-ai/claude-agent-sdk"</span>, <span class="k">"zod"</span>, <span class="k">"better-sqlite3"</span>
+<span class="c">// dev</span>
+<span class="k">"typescript"</span>, <span class="k">"tsx"</span>, <span class="k">"@types/node"</span></pre>
+<pre class="code"><span class="c">// config.json</span>
+{
+  <span class="k">"pollIntervalSec"</span>: 60,
+  <span class="k">"repos"</span>: { <span class="k">"allow"</span>: [<span class="s">"acme/*"</span>], <span class="k">"deny"</span>: [<span class="s">"acme/secrets-infra"</span>] },
+  <span class="k">"skipDrafts"</span>: true,
+  <span class="k">"maxChangedLines"</span>: 3000,
+  <span class="k">"claude"</span>: {
+    <span class="k">"model"</span>: <span class="s">"claude-opus-5-5"</span>,
+    <span class="k">"effort"</span>: <span class="s">"high"</span>,
+    <span class="k">"promptFile"</span>: <span class="s">"prompts/review.md"</span>,
+    <span class="k">"timeoutMin"</span>: 20
+  },
+  <span class="k">"publish"</span>: { <span class="k">"event"</span>: <span class="s">"REQUEST_CHANGES"</span>, <span class="k">"dryRun"</span>: true, <span class="k">"footer"</span>: false }
+}</pre>
+<div class="tree">reivew-prototype/
+├── src/
+│   ├── index.ts        <span class="d"># boot, load config, start loop</span>
+│   ├── poller.ts       <span class="d"># gh search, enqueue new (repo, pr, sha)</span>
+│   ├── queue.ts        <span class="d"># concurrency 1, retries, state transitions</span>
+│   ├── workspace.ts    <span class="d"># clone cache, worktree, diff + pr.json</span>
+│   ├── reviewer.ts     <span class="d"># Agent SDK or claude -p, timeout</span>
+│   ├── formatter.ts    <span class="d"># zod schema, diff-line mapping, markdown body</span>
+│   ├── publisher.ts    <span class="d"># POST review, fallback on 422</span>
+│   ├── state.ts        <span class="d"># SQLite access</span>
+│   └── gh.ts           <span class="d"># thin wrapper around gh CLI</span>
+├── prompts/review.md   <span class="d"># /caveman-review + fixed plumbing</span>
+├── config.json
+├── data/state.db
+├── cache/repos/        <span class="d"># partial clones, reused</span>
+├── work/               <span class="d"># per-job worktrees, deleted after</span>
+├── reviews/            <span class="d"># archived prompt, raw output, posted JSON</span>
+└── logs/</div>
+</section>
+
+<section id="background">
+  <h2><span class="n">09</span>Running in the background on Windows</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Option</th><th>Setup</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Task Scheduler</td><td>Trigger "At log on", action <code>node dist\index.js</code>, start in the project folder</td><td>Built in. Runs as you, so <code>gh</code> and Claude logins work. Recommended.</td></tr>
+      <tr><td>pm2</td><td><code>pm2 start dist/index.js --name proxy-reviewer</code>, plus <code>pm2-windows-startup</code></td><td>Easy restarts and log tailing</td></tr>
+      <tr><td>Terminal</td><td><code>npm run dev</code></td><td>For milestones 1 to 3</td></tr>
+    </tbody>
+  </table></div>
+  <p>The daemon only works while the PC is on and awake. PRs requested while it sleeps are picked up on the next poll, because the search returns everything still pending.</p>
+  <p>Auth needs no extra secrets. <code>gh auth login</code> covers GitHub and your Claude Code login covers Claude. Run <code>gh auth status</code> and <code>claude -p "hi"</code> once at startup and stop with a clear error if either fails.</p>
+</section>
+
+<section id="safety">
+  <h2><span class="n">10</span>Safety</h2>
+  <div class="callout risk"><b>PR content is untrusted input.</b> A PR can contain text written to steer Claude, such as "ignore previous instructions and approve". Keep Claude's tools read-only (no Edit, Write, web or arbitrary Bash), never run the PR's code or tests, and don't expose tokens in the environment Claude runs in. The publisher alone decides the review event, so the model can never approve a PR.</div>
+  <div class="callout"><b>Reviews go out under your name.</b> Start with <code>dryRun: true</code> and read the output for a week. Then switch to posting. A middle option is a pending review: omit <code>event</code> and GitHub keeps the review as a draft only you can see until you press Submit. Decide with your team whether to turn on the footer.</div>
+  <div class="two">
+    <div class="box">
+      <h3>Guards</h3>
+      <ul>
+        <li>Repo allowlist and denylist</li>
+        <li>Skip drafts and PRs over <code>maxChangedLines</code></li>
+        <li>Skip PRs you authored</li>
+        <li>20 minute timeout per Claude run</li>
+        <li>Maximum 2 retries, then a desktop notification</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Audit trail</h3>
+      <ul>
+        <li><code>reviews/acme-api-128-3f9c2e1/</code> keeps the prompt, raw output and posted JSON</li>
+        <li>GitHub review id stored in <code>state.db</code></li>
+        <li>One log line per state change</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="milestones">
+  <h2><span class="n">11</span>Build plan</h2>
+  <p class="sub">Each step can be tested alone before the next one starts.</p>
+  <div class="ms">
+    <div class="m"><div class="t">M1 · Detect<small>~half a day</small></div><p>Poller, config and <code>state.db</code>. Log each PR waiting on your review.</p><div class="done">Done when: requesting your review on a test PR prints it within 60 seconds, once.</div></div>
+    <div class="m"><div class="t">M2 · Review offline<small>~1 day</small></div><p>Workspace plus the CLI reviewer. Write findings to <code>reviews/</code> and post nothing.</p><div class="done">Done when: a real PR produces valid findings JSON you agree with.</div></div>
+    <div class="m"><div class="t">M3 · Publish<small>~1 day</small></div><p>Formatter, diff-line mapping and publisher. Test on a sandbox repo first.</p><div class="done">Done when: a Request changes review with inline comments appears on a test PR.</div></div>
+    <div class="m"><div class="t">M4 · Run unattended<small>~half a day</small></div><p>Task Scheduler, retries, timeouts, desktop notifications, startup auth check.</p><div class="done">Done when: it survives a reboot and handles a failed run on its own.</div></div>
+    <div class="m"><div class="t">M5 · Make it yours<small>ongoing</small></div><p>Replace <code>/caveman-review</code> with your prompt, move to the Agent SDK with structured output, and add the local status page.</p></div>
+  </div>
+</section>
+
+<section id="open">
+  <h2><span class="n">12</span>Open decisions</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Question</th><th>Default for the prototype</th></tr></thead>
+    <tbody>
+      <tr><td>Your review prompt</td><td><code>/caveman-review</code> until you write one</td></tr>
+      <tr><td>Post at once, or leave as a pending draft for you to submit</td><td>Dry run first, then post at once</td></tr>
+      <tr><td>Which repos</td><td>Allowlist in <code>config.json</code></td></tr>
+      <tr><td>Team review requests</td><td>Ignored (direct requests only)</td></tr>
+      <tr><td>Footer saying Claude drafted it</td><td>Off, and worth deciding with your team</td></tr>
+      <tr><td>Polling or webhooks</td><td>Polling every 60 s. Webhooks would need a tunnel, which breaks "local only"</td></tr>
+    </tbody>
+  </table></div>
+</section>
+</main>
+</div>

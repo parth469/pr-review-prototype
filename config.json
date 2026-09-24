@@ -1,0 +1,9 @@
+{
+  "pollIntervalSec": 60,
+  "repos": { "allow": ["*"], "deny": [] },
+  "skipDrafts": true,
+  "skipOwnPrs": true,
+  "maxChangedLines": 3000,
+  "dataDir": "data",
+  "logLevel": "info"
+}
