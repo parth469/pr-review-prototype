@@ -46,16 +46,19 @@ function job(headSha: string): Job {
     output_dir: null,
     cost_usd: null,
     duration_ms: null,
+    review_url: null,
+    event: null,
     created_at: "",
     updated_at: "",
   };
 }
 
-describe("workspace", () => {
+// Real git on Windows is slow, more so with test files running in parallel.
+describe("workspace", { timeout: 60_000 }, () => {
   let origin: { dir: string; headSha: string };
   beforeAll(async () => {
     origin = await makeOrigin();
-  });
+  }, 60_000);
 
   function setup(apiHeadSha: string) {
     const root = mkdtempSync(join(tmpdir(), "proxy-ws-"));

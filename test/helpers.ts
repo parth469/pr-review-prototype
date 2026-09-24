@@ -18,6 +18,8 @@ export function makePr(overrides: Partial<PullRequest> = {}): PullRequest {
     baseRef: "main",
     baseSha: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
     draft: false,
+    state: "open",
+    merged: false,
     changedLines: 120,
     ...overrides,
   };

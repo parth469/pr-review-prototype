@@ -36,6 +36,14 @@ export const configSchema = z.object({
       keepWorktree: z.boolean().default(false),
     })
     .prefault({}),
+  publish: z
+    .object({
+      // submit: post now · pending: draft only you can see · dry-run: write the payload only
+      mode: z.enum(["submit", "pending", "dry-run"]).default("submit"),
+      // Skip posting if you are no longer a requested reviewer (e.g. you reviewed by hand).
+      requireStillRequested: z.boolean().default(true),
+    })
+    .prefault({}),
 });
 
 export type Config = z.infer<typeof configSchema>;

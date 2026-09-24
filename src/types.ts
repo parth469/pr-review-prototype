@@ -10,6 +10,8 @@ export interface PullRequest {
   baseRef: string;
   baseSha: string;
   draft: boolean;
+  state: "open" | "closed";
+  merged: boolean;
   changedLines: number;
 }
 
@@ -31,4 +33,38 @@ export interface PullSource {
   getPull(repo: string, number: number): Promise<PullRequest>;
   getPullDiff(repo: string, number: number): Promise<string>;
   listPullFiles(repo: string, number: number): Promise<PullFile[]>;
+}
+
+export interface PostedReview {
+  id: number;
+  url: string;
+  state: string; // "CHANGES_REQUESTED" | "COMMENTED" | "PENDING" | ...
+}
+
+export interface CreateReviewPayload {
+  commit_id: string;
+  body: string;
+  /** Omitted: GitHub creates a pending review only the author can see. */
+  event?: "REQUEST_CHANGES" | "COMMENT";
+  comments: Array<{
+    path: string;
+    line: number;
+    side: "RIGHT";
+    start_line?: number;
+    start_side?: "RIGHT";
+    body: string;
+  }>;
+}
+
+/** GitHub calls the publisher needs. */
+export interface ReviewTarget {
+  getPull(repo: string, number: number): Promise<PullRequest>;
+  listRequestedReviewers(repo: string, number: number): Promise<string[]>;
+  findOwnReview(
+    repo: string,
+    number: number,
+    viewer: string,
+    marker: string,
+  ): Promise<PostedReview | undefined>;
+  createReview(repo: string, number: number, payload: CreateReviewPayload): Promise<PostedReview>;
 }

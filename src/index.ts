@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { createGitHub, getGhToken, parsePrRef } from "./github.ts";
 import { createLogger } from "./log.ts";
 import { pollOnce, startPolling } from "./poller.ts";
+import { createPublisher } from "./publisher.ts";
 import { createReviewer, resolvePluginPath } from "./reviewer.ts";
 import { openState } from "./state.ts";
 import { createWorker } from "./worker.ts";
@@ -13,6 +14,7 @@ const { values: args } = parseArgs({
   options: {
     once: { type: "boolean", default: false },
     review: { type: "string" },
+    "publish-only": { type: "string" },
     config: { type: "string", default: "config.json" },
   },
 });
@@ -44,6 +46,7 @@ try {
       token,
     }),
     runReview: createReviewer(),
+    publisher: createPublisher({ github, config, viewer, log }),
     config,
     log,
     pluginPath: () => {
@@ -57,12 +60,20 @@ try {
   const { signal } = controller;
 
   log.info(
-    { viewer, intervalSec: config.pollIntervalSec, reviews: config.review.enabled },
+    {
+      viewer,
+      intervalSec: config.pollIntervalSec,
+      reviews: config.review.enabled,
+      publish: config.publish.mode,
+    },
     "proxy reviewer started",
   );
 
+  // A manual run succeeded only if the review ended up on GitHub (or in a dry-run payload).
+  const ok = (job: { status: string } | undefined) => job?.status === "done";
+
   if (args.review) {
-    // Review one PR by hand, whatever the skip rules say.
+    // Review and publish one PR by hand, whatever the skip rules say.
     const { repo, number } = parsePrRef(args.review);
     const pr = await github.getPull(repo, number);
     const job = state.enqueue({
@@ -72,8 +83,16 @@ try {
       title: pr.title,
       url: pr.url,
     });
-    const after = await worker.processOne(signal, job.id);
-    if (after?.status !== "reviewed") process.exitCode = 1;
+    const after = await worker.processOne(signal, job.id, { force: true });
+    if (!ok(after)) process.exitCode = 1;
+  } else if (args["publish-only"]) {
+    // Post a saved review again without re-running Claude. Duplicates are still detected.
+    const id = Number(args["publish-only"]);
+    const job = state.get(id);
+    if (!job?.output_dir) throw new Error(`Job ${id} has no saved review`);
+    state.setStatus(id, "reviewed");
+    const after = await worker.processOne(signal, id, { force: true });
+    if (!ok(after)) process.exitCode = 1;
   } else if (args.once) {
     log.info(await pollOnce(deps), "poll finished");
     if (config.review.enabled) {

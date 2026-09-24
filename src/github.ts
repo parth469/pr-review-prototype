@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Octokit } from "octokit";
 import type { Logger } from "./log.ts";
-import type { GitHubClient, PullRequest, PullSource } from "./types.ts";
+import type { GitHubClient, PullRequest, PullSource, ReviewTarget } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,7 +45,7 @@ function splitRepo(repo: string): { owner: string; repo: string } {
   return { owner, repo: name };
 }
 
-export interface GitHub extends GitHubClient, PullSource {
+export interface GitHub extends GitHubClient, PullSource, ReviewTarget {
   getViewerLogin(): Promise<string>;
 }
 
@@ -101,8 +101,37 @@ export function createGitHub(token: string, log: Logger): GitHub {
         baseRef: data.base.ref,
         baseSha: data.base.sha,
         draft: data.draft ?? false,
+        state: data.state === "open" ? "open" : "closed",
+        merged: data.merged,
         changedLines: data.additions + data.deletions,
       };
+    },
+
+    async listRequestedReviewers(repo, number) {
+      const { data } = await octokit.request(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
+        { ...splitRepo(repo), pull_number: number },
+      );
+      return data.users.map((u) => u.login);
+    },
+
+    async findOwnReview(repo, number, viewer, marker) {
+      const reviews = await octokit.paginate(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+        { ...splitRepo(repo), pull_number: number, per_page: 100 },
+      );
+      const mine = reviews.find(
+        (r) => r.user?.login.toLowerCase() === viewer.toLowerCase() && r.body?.includes(marker),
+      );
+      return mine ? { id: mine.id, url: mine.html_url, state: mine.state } : undefined;
+    },
+
+    async createReview(repo, number, payload) {
+      const { data } = await octokit.request(
+        "POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+        { ...splitRepo(repo), pull_number: number, ...payload },
+      );
+      return { id: Number(data.id), url: data.html_url, state: data.state };
     },
 
     async getPullDiff(repo, number) {

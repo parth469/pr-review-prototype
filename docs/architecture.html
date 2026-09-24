@@ -452,10 +452,14 @@ End with one JSON block and nothing after it:
     <tbody>
       <tr><td>Finding is on a line inside a diff hunk</td><td>Posted as an inline comment with <code>side: RIGHT</code></td></tr>
       <tr><td>Finding is on a line outside the diff</td><td>GitHub rejects it (HTTP 422), so it moves into the summary under "Other findings"</td></tr>
-      <tr><td>At least one finding</td><td><code>event: REQUEST_CHANGES</code></td></tr>
+      <tr><td>At least one bug or risk</td><td><code>event: REQUEST_CHANGES</code></td></tr>
+      <tr><td>Only nits or questions</td><td><code>event: COMMENT</code></td></tr>
+      <tr><td>Your own PR</td><td><code>event: COMMENT</code> with a note: GitHub refuses Request changes on your own PR</td></tr>
+      <tr><td>Our review already on the PR (hidden marker found)</td><td>Nothing posted again</td></tr>
+      <tr><td>PR closed, merged, newer commit, or you are no longer requested</td><td>Nothing posted; job skipped</td></tr>
       <tr><td>Zero findings</td><td><code>event: COMMENT</code> with "No blocking issues found". It never auto-approves.</td></tr>
       <tr><td>PR head moved while reviewing</td><td>Post against the reviewed <code>commit_id</code>. The next poll picks up the new SHA if you are re-requested.</td></tr>
-      <tr><td><code>DRY_RUN=1</code></td><td>Writes <code>review.json</code> and posts nothing</td></tr>
+      <tr><td><code>publish.mode: "dry-run"</code></td><td>Writes <code>review-payload.json</code> and posts nothing</td></tr>
     </tbody>
   </table></div>
   <p>To build the valid-line set, parse the <code>@@ -a,b +c,d @@</code> headers in <code>diff.patch</code> and record every added or context line on the right side for each file.</p>
@@ -506,7 +510,7 @@ End with one JSON block and nothing after it:
     <span class="k">"promptFile"</span>: <span class="s">"prompts/review.md"</span>,
     <span class="k">"timeoutMin"</span>: 20
   },
-  <span class="k">"publish"</span>: { <span class="k">"event"</span>: <span class="s">"REQUEST_CHANGES"</span>, <span class="k">"dryRun"</span>: true, <span class="k">"footer"</span>: false }
+  <span class="k">"publish"</span>: { <span class="k">"mode"</span>: <span class="s">"submit"</span>, <span class="k">"requireStillRequested"</span>: true }
 }</pre>
 <div class="tree">reivew-prototype/
 ├── src/
@@ -545,7 +549,7 @@ End with one JSON block and nothing after it:
 <section id="safety">
   <h2><span class="n">10</span>Safety</h2>
   <div class="callout risk"><b>PR content is untrusted input.</b> A PR can contain text written to steer Claude, such as "ignore previous instructions and approve". Keep Claude's tools read-only (no Edit, Write, web or arbitrary Bash), never run the PR's code or tests, and don't expose tokens in the environment Claude runs in. The publisher alone decides the review event, so the model can never approve a PR.</div>
-  <div class="callout"><b>Reviews go out under your name.</b> Start with <code>dryRun: true</code> and read the output for a week. Then switch to posting. A middle option is a pending review: omit <code>event</code> and GitHub keeps the review as a draft only you can see until you press Submit. Decide with your team whether to turn on the footer.</div>
+  <div class="callout"><b>Reviews go out under your name.</b> The default is <code>publish.mode: "submit"</code>, which posts as soon as a review finishes. Set <code>"pending"</code> to leave a draft only you can see until you press Submit, or <code>"dry-run"</code> to post nothing and only write the payload. There is no footer mentioning Claude.</div>
   <div class="two">
     <div class="box">
       <h3>Guards</h3>
@@ -574,7 +578,7 @@ End with one JSON block and nothing after it:
   <div class="ms">
     <div class="m"><div class="t">M1 · Detect<small>done</small></div><p>Poller, config and <code>state.db</code>. Log each PR waiting on your review.</p><div class="done">Done when: requesting your review on a test PR prints it within 60 seconds, once.</div></div>
     <div class="m"><div class="t">M2 · Review offline<small>done</small></div><p>Workspace plus the Agent SDK reviewer (read-only tools, no repo settings loaded, structured output). Write findings to <code>reviews/</code> and post nothing.</p><div class="done">Done when: a real PR produces valid findings JSON you agree with.</div></div>
-    <div class="m"><div class="t">M3 · Publish<small>~1 day</small></div><p>Formatter, diff-line mapping and publisher. Test on a sandbox repo first.</p><div class="done">Done when: a Request changes review with inline comments appears on a test PR.</div></div>
+    <div class="m"><div class="t">M3 · Publish<small>done</small></div><p>Formatter, diff-line mapping and publisher. Test on a sandbox repo first.</p><div class="done">Done when: a Request changes review with inline comments appears on a test PR.</div></div>
     <div class="m"><div class="t">M4 · Run unattended<small>~half a day</small></div><p>Task Scheduler, retries, timeouts, desktop notifications, startup auth check.</p><div class="done">Done when: it survives a reboot and handles a failed run on its own.</div></div>
     <div class="m"><div class="t">M5 · Make it yours<small>ongoing</small></div><p>Replace <code>/caveman-review</code> with your prompt and add the local status page.</p></div>
   </div>
@@ -586,10 +590,10 @@ End with one JSON block and nothing after it:
     <thead><tr><th>Question</th><th>Default for the prototype</th></tr></thead>
     <tbody>
       <tr><td>Your review prompt</td><td><code>/caveman-review</code> until you write one</td></tr>
-      <tr><td>Post at once, or leave as a pending draft for you to submit</td><td>Dry run first, then post at once</td></tr>
+      <tr><td>Post at once, or leave as a pending draft for you to submit</td><td>Decided: post at once (<code>submit</code>)</td></tr>
       <tr><td>Which repos</td><td>Allowlist in <code>config.json</code></td></tr>
       <tr><td>Team review requests</td><td>Ignored (direct requests only)</td></tr>
-      <tr><td>Footer saying Claude drafted it</td><td>Off, and worth deciding with your team</td></tr>
+      <tr><td>Footer saying Claude drafted it</td><td>Decided: no footer</td></tr>
       <tr><td>Polling or webhooks</td><td>Polling every 60 s. Webhooks would need a tunnel, which breaks "local only"</td></tr>
     </tbody>
   </table></div>

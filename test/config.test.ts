@@ -29,6 +29,7 @@ describe("config", () => {
         maxAttempts: 3,
         keepWorktree: false,
       },
+      publish: { mode: "submit", requireStillRequested: true },
     });
   });
 

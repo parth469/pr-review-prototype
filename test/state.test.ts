@@ -71,7 +71,7 @@ describe("state", () => {
       const job = state.claimNext(t0);
       if (!job) throw new Error("no job");
 
-      const first = state.failAttempt(job.id, "boom", 3, t0);
+      const first = state.failAttempt(job.id, "boom", 3, { now: t0 });
       expect(first).toMatchObject({ status: "queued", attempts: 1, error: "boom" });
       expect(first.next_attempt_at).toBe("2026-09-24T10:05:00.000Z");
 
@@ -79,10 +79,10 @@ describe("state", () => {
       expect(state.claimNext(new Date("2026-09-24T10:04:00Z"))).toBeUndefined();
       expect(state.claimNext(new Date("2026-09-24T10:05:00Z"))?.id).toBe(job.id);
 
-      const second = state.failAttempt(job.id, "boom", 3, t0);
+      const second = state.failAttempt(job.id, "boom", 3, { now: t0 });
       expect(second.next_attempt_at).toBe("2026-09-24T10:20:00.000Z");
       state.claimNext(new Date("2026-09-24T11:00:00Z"));
-      expect(state.failAttempt(job.id, "boom", 3, t0)).toMatchObject({
+      expect(state.failAttempt(job.id, "boom", 3, { now: t0 })).toMatchObject({
         status: "failed",
         attempts: 3,
       });
@@ -113,6 +113,55 @@ describe("state", () => {
       state.setStatus(job.id, "reviewing");
       expect(state.recoverStale()).toBe(1);
       expect(state.get(job.id)?.status).toBe("queued");
+    });
+
+    describe("publishing", () => {
+      const reviewedJob = () => {
+        state.recordSeen(base);
+        const job = state.claimNext();
+        if (!job) throw new Error("no job");
+        state.setStatus(job.id, "reviewing");
+        state.failAttempt(job.id, "flaky", 3); // an earlier review attempt failed
+        state.claimById(job.id);
+        state.completeReview(job.id, { findings: 2, outputDir: "/r", costUsd: 1, durationMs: 1 });
+        return job.id;
+      };
+
+      it("gives a reviewed job a fresh attempt budget and claims it for posting", () => {
+        const id = reviewedJob();
+        expect(state.get(id)).toMatchObject({ status: "reviewed", attempts: 0, error: null });
+        expect(state.claimNext()).toMatchObject({ id, status: "posting" });
+      });
+
+      it("retries a failed post as reviewed, so Claude does not run again", () => {
+        const id = reviewedJob();
+        state.claimNext();
+        const t0 = new Date("2026-09-24T10:00:00Z");
+        const after = state.failAttempt(id, "502", 3, { now: t0, retryStatus: "reviewed" });
+        expect(after).toMatchObject({ status: "reviewed", attempts: 1 });
+        expect(state.claimNext(new Date("2026-09-24T10:01:00Z"))).toBeUndefined();
+        expect(state.claimNext(new Date("2026-09-24T10:06:00Z"))?.status).toBe("posting");
+      });
+
+      it("records the posted review", () => {
+        const id = reviewedJob();
+        state.claimNext();
+        state.completePublish(id, { reviewId: 77, url: "https://r", event: "CHANGES_REQUESTED" });
+        expect(state.get(id)).toMatchObject({
+          status: "done",
+          review_id: 77,
+          review_url: "https://r",
+          event: "CHANGES_REQUESTED",
+          reason: null,
+        });
+      });
+
+      it("resumes an interrupted post as reviewed", () => {
+        const id = reviewedJob();
+        state.claimNext();
+        expect(state.recoverStale()).toBe(1);
+        expect(state.get(id)?.status).toBe("reviewed");
+      });
     });
 
     it("enqueues by hand and resets a finished job", () => {

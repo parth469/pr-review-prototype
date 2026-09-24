@@ -23,5 +23,9 @@
     "maxTurns": 80,
     "maxAttempts": 3,
     "keepWorktree": false
+  },
+  "publish": {
+    "mode": "submit",
+    "requireStillRequested": true
   }
 }
