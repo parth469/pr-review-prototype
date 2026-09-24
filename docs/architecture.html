@@ -534,16 +534,19 @@ End with one JSON block and nothing after it:
 
 <section id="background">
   <h2><span class="n">09</span>Running in the background on Windows</h2>
+  <p class="sub">Chosen setup: a Task Scheduler task runs a supervisor, which runs the server. It is installed with <code>npm run service -- install</code>.</p>
   <div class="tablewrap"><table>
-    <thead><tr><th>Option</th><th>Setup</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Piece</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td>Task Scheduler</td><td>Trigger "At log on", action <code>node dist\index.js</code>, start in the project folder</td><td>Built in. Runs as you, so <code>gh</code> and Claude logins work. Recommended.</td></tr>
-      <tr><td>pm2</td><td><code>pm2 start dist/index.js --name proxy-reviewer</code>, plus <code>pm2-windows-startup</code></td><td>Easy restarts and log tailing</td></tr>
-      <tr><td>Terminal</td><td><code>npm run dev</code></td><td>For milestones 1 to 3</td></tr>
+      <tr><td>Task "Proxy Reviewer"</td><td>Starts 30 s after you log on, as you (no admin), with no window via <code>conhost --headless</code>. No time limit, runs on battery.</td></tr>
+      <tr><td>Supervisor</td><td>Restarts the server after a crash: 5 s, 15 s, 1 min, then every 5 min. Startup-check failures retry slowly and notify once.</td></tr>
+      <tr><td>Locks</td><td><code>data/supervisor.lock</code> and <code>data/server.lock</code> keep one of each running. <code>stop</code> kills the whole process tree.</td></tr>
+      <tr><td>Startup checks</td><td>git, <code>gh</code> login, the review skill, the prompt file and writable folders, each with the command that fixes it.</td></tr>
+      <tr><td>Notifications</td><td>Windows notification when a review is posted or a job fails for good; click to open the PR.</td></tr>
+      <tr><td>Logs</td><td><code>logs/</code>, rotated daily or at 10 MB, last 7 kept.</td></tr>
     </tbody>
   </table></div>
-  <p>The daemon only works while the PC is on and awake. PRs requested while it sleeps are picked up on the next poll, because the search returns everything still pending.</p>
-  <p>Auth needs no extra secrets. <code>gh auth login</code> covers GitHub and your Claude Code login covers Claude. Run <code>gh auth status</code> and <code>claude -p "hi"</code> once at startup and stop with a clear error if either fails.</p>
+  <p>It only runs while you are logged on and the PC is awake, because it uses your <code>gh</code> and Claude logins. PRs requested while it sleeps are picked up on the next poll, because the search returns everything still pending.</p>
 </section>
 
 <section id="safety">
@@ -579,7 +582,7 @@ End with one JSON block and nothing after it:
     <div class="m"><div class="t">M1 · Detect<small>done</small></div><p>Poller, config and <code>state.db</code>. Log each PR waiting on your review.</p><div class="done">Done when: requesting your review on a test PR prints it within 60 seconds, once.</div></div>
     <div class="m"><div class="t">M2 · Review offline<small>done</small></div><p>Workspace plus the Agent SDK reviewer (read-only tools, no repo settings loaded, structured output). Write findings to <code>reviews/</code> and post nothing.</p><div class="done">Done when: a real PR produces valid findings JSON you agree with.</div></div>
     <div class="m"><div class="t">M3 · Publish<small>done</small></div><p>Formatter, diff-line mapping and publisher. Test on a sandbox repo first.</p><div class="done">Done when: a Request changes review with inline comments appears on a test PR.</div></div>
-    <div class="m"><div class="t">M4 · Run unattended<small>~half a day</small></div><p>Task Scheduler, retries, timeouts, desktop notifications, startup auth check.</p><div class="done">Done when: it survives a reboot and handles a failed run on its own.</div></div>
+    <div class="m"><div class="t">M4 · Run unattended<small>done</small></div><p>Task Scheduler, retries, timeouts, desktop notifications, startup auth check.</p><div class="done">Done when: it survives a reboot and handles a failed run on its own.</div></div>
     <div class="m"><div class="t">M5 · Make it yours<small>ongoing</small></div><p>Replace <code>/caveman-review</code> with your prompt and add the local status page.</p></div>
   </div>
 </section>

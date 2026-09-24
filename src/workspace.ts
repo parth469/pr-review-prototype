@@ -36,6 +36,8 @@ export interface WorkspaceOptions {
   token?: string;
   /** Where to clone from. Tests point this at a local repo. */
   remoteUrl?: (repo: string) => string;
+  /** Per git command. */
+  gitTimeoutMs?: number;
 }
 
 export function jobSlug(job: Pick<Job, "repo" | "pr" | "head_sha">): string {
@@ -47,7 +49,11 @@ export function createWorkspace(options: WorkspaceOptions): Workspace {
   const workRoot = resolve(options.workDir);
   const remoteUrl = options.remoteUrl ?? ((repo) => `https://github.com/${repo}.git`);
   const token = options.token;
-  const gitOpts = (cwd?: string) => ({ ...(cwd ? { cwd } : {}), ...(token ? { token } : {}) });
+  const gitOpts = (cwd?: string) => ({
+    ...(cwd ? { cwd } : {}),
+    ...(token ? { token } : {}),
+    ...(options.gitTimeoutMs ? { timeoutMs: options.gitTimeoutMs } : {}),
+  });
 
   async function ensureClone(repo: string): Promise<string> {
     const dir = join(cacheRoot, repo);

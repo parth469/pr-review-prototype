@@ -46,7 +46,7 @@ function trim(text: string): string {
   return text.length <= MAX_BODY ? text : `${text.slice(0, MAX_BODY - 20)}\n\n…(truncated)`;
 }
 
-function countLine(findings: Finding[]): string {
+export function countFindings(findings: Finding[]): string {
   const order: Finding["severity"][] = ["bug", "risk", "question", "nit"];
   return order
     .map((s) => {
@@ -107,7 +107,7 @@ export function buildReview({
 
   const event = chooseEvent(review, pr, viewer);
   const parts = [review.summary];
-  if (review.findings.length > 0) parts.push(`**${countLine(review.findings)}**`);
+  if (review.findings.length > 0) parts.push(`**${countFindings(review.findings)}**`);
   if (outside.length > 0) {
     const heading = comments.length > 0 ? "Other findings" : "Findings";
     parts.push(

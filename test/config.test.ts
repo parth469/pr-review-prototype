@@ -16,6 +16,8 @@ describe("config", () => {
       cacheDir: "cache",
       workDir: "work",
       reviewsDir: "reviews",
+      logDir: "logs",
+      gitTimeoutSec: 300,
       logLevel: "info",
       review: {
         enabled: true,
@@ -30,6 +32,7 @@ describe("config", () => {
         keepWorktree: false,
       },
       publish: { mode: "submit", requireStillRequested: true },
+      notify: { enabled: true, onPosted: true, onFailed: true },
     });
   });
 

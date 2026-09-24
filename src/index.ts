@@ -1,12 +1,17 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.ts";
-import { createGitHub, getGhToken, parsePrRef } from "./github.ts";
+import { git } from "./git.ts";
+import { createGitHub, type GitHub, getGhToken, parsePrRef } from "./github.ts";
+import { acquireLock } from "./lock.ts";
 import { createLogger } from "./log.ts";
+import { createNotifier, notificationFor } from "./notify.ts";
 import { pollOnce, startPolling } from "./poller.ts";
+import { PreflightError, runPreflight } from "./preflight.ts";
 import { createPublisher } from "./publisher.ts";
 import { createReviewer, resolvePluginPath } from "./reviewer.ts";
 import { openState } from "./state.ts";
+import { EXIT_PREFLIGHT } from "./supervisor.ts";
 import { createWorker } from "./worker.ts";
 import { createWorkspace } from "./workspace.ts";
 
@@ -20,7 +25,17 @@ const { values: args } = parseArgs({
 });
 
 const config = await loadConfig(args.config);
-const log = createLogger(config.logLevel);
+const log = createLogger(config.logLevel, { logDir: config.logDir });
+const notifier = createNotifier(config.notify, log);
+
+// Log a crash before dying, so the supervisor's restart has a reason in the log.
+const die = (err: unknown, code = 1) => {
+  log.fatal({ err }, (err as Error)?.message ?? String(err));
+  log.flush(() => process.exit(code));
+  setTimeout(() => process.exit(code), 2000).unref();
+};
+process.on("uncaughtException", (err) => die(err));
+process.on("unhandledRejection", (err) => die(err));
 
 const controller = new AbortController();
 const stop = (signal: string) => {
@@ -30,13 +45,38 @@ const stop = (signal: string) => {
 process.once("SIGINT", () => stop("SIGINT"));
 process.once("SIGTERM", () => stop("SIGTERM"));
 
-try {
-  const token = await getGhToken();
-  const github = createGitHub(token, log);
-  const viewer = await github.getViewerLogin();
-  const state = openState(join(config.dataDir, "state.db"));
+let pluginPath: Promise<string> | undefined;
+const getPluginPath = () => {
+  pluginPath ??= config.review.pluginPath
+    ? Promise.resolve(config.review.pluginPath)
+    : resolvePluginPath("caveman@caveman");
+  return pluginPath;
+};
 
-  let pluginPath: Promise<string> | undefined;
+let releaseLock: (() => void) | undefined;
+try {
+  // 1. Everything the server needs, checked up front with a fix for each problem.
+  let token = "";
+  let github: GitHub | undefined;
+  let viewer = "";
+  const checks = await runPreflight(config, {
+    nodeVersion: process.version,
+    gitVersion: () => git(["--version"], { timeoutMs: 15_000 }),
+    githubLogin: async () => {
+      token = await getGhToken();
+      github = createGitHub(token, log);
+      viewer = await github.getViewerLogin();
+      return viewer;
+    },
+    pluginPath: getPluginPath,
+  });
+  for (const c of checks.filter((c) => !c.ok)) log.warn({ check: c.name }, c.detail);
+  if (!github) throw new Error("GitHub client missing after preflight");
+
+  // 2. One server at a time.
+  releaseLock = acquireLock(join(config.dataDir, "server.lock"));
+
+  const state = openState(join(config.dataDir, "state.db"));
   const worker = createWorker({
     state,
     workspace: createWorkspace({
@@ -44,16 +84,16 @@ try {
       workDir: config.workDir,
       source: github,
       token,
+      gitTimeoutMs: config.gitTimeoutSec * 1000,
     }),
     runReview: createReviewer(),
     publisher: createPublisher({ github, config, viewer, log }),
     config,
     log,
-    pluginPath: () => {
-      pluginPath ??= config.review.pluginPath
-        ? Promise.resolve(config.review.pluginPath)
-        : resolvePluginPath("caveman@caveman");
-      return pluginPath;
+    pluginPath: getPluginPath,
+    onEvent: (event) => {
+      const wanted = event.type === "posted" ? config.notify.onPosted : config.notify.onFailed;
+      if (wanted) void notifier.notify(notificationFor(event));
     },
   });
   const deps = { github, state, config, viewer, log, onQueued: () => worker.kick() };
@@ -62,6 +102,7 @@ try {
   log.info(
     {
       viewer,
+      pid: process.pid,
       intervalSec: config.pollIntervalSec,
       reviews: config.review.enabled,
       publish: config.publish.mode,
@@ -107,6 +148,12 @@ try {
   }
   state.close();
 } catch (err) {
+  // Setup problems (not logged in, already running...) get the supervisor's slow retry.
+  const setup = err instanceof PreflightError || (err as Error).name === "AlreadyRunningError";
   log.fatal({ err }, (err as Error).message);
-  process.exitCode = 1;
+  // The supervisor reads the last stderr line as the reason for its notification.
+  console.error((err as Error).message);
+  process.exitCode = setup ? EXIT_PREFLIGHT : 1;
+} finally {
+  releaseLock?.();
 }

@@ -20,6 +20,9 @@ export const configSchema = z.object({
   cacheDir: z.string().min(1).default("cache"),
   workDir: z.string().min(1).default("work"),
   reviewsDir: z.string().min(1).default("reviews"),
+  logDir: z.string().min(1).default("logs"),
+  // Longest a single git command (clone, fetch, checkout) may run before it is killed.
+  gitTimeoutSec: z.number().int().min(10).default(300),
   logLevel: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
   review: z
     .object({
@@ -42,6 +45,13 @@ export const configSchema = z.object({
       mode: z.enum(["submit", "pending", "dry-run"]).default("submit"),
       // Skip posting if you are no longer a requested reviewer (e.g. you reviewed by hand).
       requireStillRequested: z.boolean().default(true),
+    })
+    .prefault({}),
+  notify: z
+    .object({
+      enabled: z.boolean().default(true),
+      onPosted: z.boolean().default(true),
+      onFailed: z.boolean().default(true),
     })
     .prefault({}),
 });

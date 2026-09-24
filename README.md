@@ -2,7 +2,7 @@
 
 A local background process that finds GitHub PRs where you are a requested reviewer, has Claude review them, and posts the review under your account. Architecture: [`docs/architecture.html`](docs/architecture.html).
 
-**Status: M3 (publish).** It finds review requests, checks out each PR, has Claude review it, and posts the review to the PR under your account: a summary plus one inline comment per finding.
+**Status: M4 (runs unattended).** It finds review requests, checks out each PR, has Claude review it, and posts the review to the PR under your account: a summary plus one inline comment per finding.
 
 ## Requirements
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
@@ -17,6 +17,22 @@ npm run once                                  # poll, review what is queued, exi
 npm run review -- owner/repo#123              # review and post one PR now, ignoring skip rules
 npm start                                     # poll every 60 s and review in the background
 ```
+
+## Run in the background (Windows)
+```sh
+npm run service -- install      # register the logon task and start it now
+npm run status                  # task, processes, recent jobs, log file
+npm run service -- stop         # stop it (it comes back at next logon)
+npm run service -- start        # start it again
+npm run service -- uninstall    # stop it and remove the task
+npm run service -- test-notify  # show a sample desktop notification
+```
+- **Starts by itself.** A Task Scheduler task named "Proxy Reviewer" starts 30 s after you log on, runs as you with no window, and never needs admin rights. It only runs while you are logged on, because it uses your `gh` and Claude logins.
+- **Restarts itself.** A small supervisor restarts the server after a crash (5 s, 15 s, 1 min, then every 5 min). If startup checks fail (for example, no network yet or logged out of `gh`), it retries more slowly and sends one notification with the reason.
+- **One at a time.** A lock file stops a second server. `npm start` while the service runs says "already running".
+- **Notifications.** A Windows notification appears when a review is posted ("Requested changes · owner/repo#12") or when a job fails for good. Click it to open the PR.
+- **Logs.** `logs/proxy-reviewer.<date>.N.log` (server) and `logs/supervisor.<date>.N.log`, rotated daily or at 10 MB, keeping the last 7.
+- **Sleep.** Nothing runs while the PC sleeps. On wake the next poll picks up whatever is waiting.
 
 ## Commands
 | Command | What it does |
@@ -53,6 +69,11 @@ npm start                                     # poll every 60 s and review in th
 | `review.maxTurns` | `80` | Stop a review after this many turns |
 | `review.maxAttempts` | `3` | Tries before a job is marked `failed` (retries after 5 and 20 min) |
 | `review.keepWorktree` | `false` | Keep the checkout for debugging |
+| `gitTimeoutSec` | `300` | Kill a git command (and its helpers) that runs longer than this |
+| `logDir` | `logs` | Where log files go |
+| `notify.enabled` | `true` | Desktop notifications on/off |
+| `notify.onPosted` | `true` | Notify when a review is posted |
+| `notify.onFailed` | `true` | Notify when a job gives up after its last attempt |
 | `publish.mode` | `submit` | `submit` posts at once · `pending` leaves a draft only you can see · `dry-run` posts nothing and writes the payload |
 | `publish.requireStillRequested` | `true` | Don't post if you are no longer a requested reviewer (for example, you already reviewed by hand). `--review` ignores this |
 
@@ -105,6 +126,11 @@ src/diff.ts       lines of the diff that can take a comment
 src/publish.ts    builds the GitHub review from the findings
 src/publisher.ts  de-duplication, relevance checks, posting
 src/worker.ts     job processing, retries, output files
+src/preflight.ts  startup checks with a fix for each problem
+src/lock.ts       single-instance lock
+src/notify.ts     Windows desktop notifications
+src/supervisor.ts restarts the server with backoff
+src/service.ts    Task Scheduler install / start / stop / status
 prompts/review.md review prompt
 test/             vitest tests
 ```

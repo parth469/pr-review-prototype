@@ -7,6 +7,7 @@ import type { Publisher, PublishOptions } from "./publisher.ts";
 import { renderReviewMarkdown } from "./report.ts";
 import type { ReviewRun, RunReview } from "./reviewer.ts";
 import type { Job, State } from "./state.ts";
+import type { PostedReview } from "./types.ts";
 import { HeadMovedError, type PreparedWorkspace, type Workspace } from "./workspace.ts";
 
 export interface WorkerDeps {
@@ -18,7 +19,13 @@ export interface WorkerDeps {
   log: Logger;
   /** Resolved lazily so a missing plugin fails the job with a clear error, not startup. */
   pluginPath: () => Promise<string>;
+  /** Notable outcomes, e.g. for desktop notifications. Must not throw. */
+  onEvent?: (event: WorkerEvent) => void;
 }
+
+export type WorkerEvent =
+  | { type: "posted"; job: Job; review: PostedReview; run: ReviewRun }
+  | { type: "failed"; job: Job; step: "review" | "posting"; error: string };
 
 export interface Worker {
   /**
@@ -163,6 +170,7 @@ export function createWorker(deps: WorkerDeps): Worker {
             },
             result.kind === "posted" ? "posted" : "already posted",
           );
+          if (result.kind === "posted") deps.onEvent?.({ type: "posted", job, review, run });
           break;
         }
         case "dry-run":
@@ -190,9 +198,10 @@ export function createWorker(deps: WorkerDeps): Worker {
     }
   }
 
-  function logFailure(after: Job, err: unknown, fields: Fields, step: string): void {
+  function logFailure(after: Job, err: unknown, fields: Fields, step: "review" | "posting"): void {
     if (after.status === "failed") {
       log.error({ ...fields, err, attempts: after.attempts }, `${step} failed, giving up`);
+      deps.onEvent?.({ type: "failed", job: after, step, error: (err as Error).message });
     } else {
       log.warn(
         { ...fields, err, attempts: after.attempts, retryAt: after.next_attempt_at },

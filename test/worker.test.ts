@@ -6,7 +6,7 @@ import { parseConfig } from "../src/config.ts";
 import type { Publisher, PublishResult } from "../src/publisher.ts";
 import type { RunReview } from "../src/reviewer.ts";
 import { openState, type State } from "../src/state.ts";
-import { createWorker } from "../src/worker.ts";
+import { createWorker, type WorkerEvent } from "../src/worker.ts";
 import { HeadMovedError, type Workspace } from "../src/workspace.ts";
 import { makePr, silentLog } from "./helpers.ts";
 
@@ -93,16 +93,47 @@ describe("worker", () => {
   });
   afterEach(() => state.close());
 
-  const make = (workspace: Workspace, runReview: RunReview, publisher = fakePublisher([posted])) =>
+  let events: WorkerEvent[] = [];
+  const make = (
+    workspace: Workspace,
+    runReview: RunReview,
+    publisher = fakePublisher([posted]),
+    maxAttempts = 3,
+  ) =>
     createWorker({
       state,
       workspace,
       runReview,
       publisher,
-      config: parseConfig({ reviewsDir: join(root, "reviews") }),
+      config: parseConfig({ reviewsDir: join(root, "reviews"), review: { maxAttempts } }),
       log: silentLog,
       pluginPath: async () => "/plugins/caveman",
+      onEvent: (e) => void events.push(e),
     });
+
+  it("reports a posted review and a final failure, but not a retry", async () => {
+    events = [];
+    await make(fakeWorkspace(root), countingReview()).processOne();
+    expect(events.map((e) => e.type)).toEqual(["posted"]);
+    expect(events[0]).toMatchObject({ review: { id: 555 } });
+
+    state.recordSeen({
+      repo: pr.repo,
+      pr: 200,
+      headSha: "abc",
+      title: "t",
+      url: "u",
+      decision: { action: "queue" },
+    });
+    events = [];
+    const failing = async () => {
+      throw new Error("overloaded");
+    };
+    await make(fakeWorkspace(root), failing, fakePublisher(), 1).processOne();
+    expect(events).toEqual([
+      expect.objectContaining({ type: "failed", step: "review", error: "overloaded" }),
+    ]);
+  });
 
   it("reviews, writes the outputs and publishes in one pass", async () => {
     const ws = fakeWorkspace(root);
