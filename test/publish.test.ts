@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildReview, chooseEvent, reviewMarker } from "../src/publish.ts";
+import type { FollowUpResult, LedgerEntry } from "../src/followup.ts";
+import { buildFollowUpReview, buildReview, chooseEvent, reviewMarker } from "../src/publish.ts";
 import type { Finding, Review } from "../src/reviewer.ts";
 import { makePr } from "./helpers.ts";
 
@@ -48,6 +49,45 @@ describe("buildReview", () => {
     expect(draft.body).toContain("`src/a.ts:99`");
     expect(draft.body).toContain("**2 bugs · 1 risk · 1 nit**");
     expect(draft.body.endsWith(reviewMarker(pr.headSha))).toBe(true);
+  });
+
+  it("shows each finding's id so the author can name it", () => {
+    const draft = buildReview({
+      review: review([
+        { ...f("bug", 5), id: "F1" },
+        { ...f("nit", 99), id: "F2" },
+      ]),
+      pr,
+      viewer: "me",
+      commentable,
+    });
+    expect(draft.comments[0]?.body).toMatch(/^\*\*F1 · 🔴 bug\*\* bug text/);
+    expect(draft.body).toContain("- **F2 · 🔵 nit** `src/a.ts:99` nit text");
+    expect(draft.body).toContain("name its id (for example F2) in a PR comment");
+  });
+
+  it("lists earlier open points a full review carries, and requests changes for them", () => {
+    const carried: LedgerEntry[] = [
+      {
+        ...f("risk", 40),
+        id: "F3",
+        body: "Token TTL is in seconds. More detail.",
+        sha: "a".repeat(40),
+        round: 1,
+        status: "not_fixed",
+        thread: null,
+      },
+    ];
+    const draft = buildReview({
+      review: review([f("nit", 5)]),
+      pr,
+      viewer: "me",
+      commentable,
+      carried,
+    });
+    expect(draft.event).toBe("REQUEST_CHANGES");
+    expect(draft.body).toContain("### Still open from earlier reviews");
+    expect(draft.body).toContain("- **F3 · 🟡 risk** `src/a.ts:40` Token TTL is in seconds.");
   });
 
   it("makes a multi-line comment when both ends are in the diff", () => {
@@ -105,5 +145,60 @@ describe("buildReview", () => {
     expect(draft.body.length).toBeLessThan(65_600);
     expect(draft.body).toContain("…(truncated)");
     expect(draft.body.endsWith(reviewMarker(pr.headSha))).toBe(true);
+  });
+});
+
+describe("buildFollowUpReview", () => {
+  const followUp = (linear: boolean, body: string): FollowUpResult => ({
+    round: 3,
+    parentJobId: 1,
+    prevSha: "a".repeat(40),
+    linear,
+    sinceLastLines: 4,
+    previous: [
+      {
+        id: "F4",
+        severity: "risk",
+        path: "src/a.ts",
+        line: 5,
+        body,
+        sha: "a".repeat(40),
+        round: 1,
+        status: "partly_fixed",
+        verdict: "partly_fixed",
+        evidence: "e",
+        reply: "Closer. Still missing: the TTL.",
+        fixedAt: [],
+        thread: { threadId: "T4", commentId: 4 },
+        threadResolved: false,
+      },
+    ],
+    ledger: [],
+  });
+  const build = (linear: boolean, body = "Short.") =>
+    buildFollowUpReview({
+      review: review([]),
+      followUp: followUp(linear, body),
+      pr,
+      commentable,
+      event: "REQUEST_CHANGES",
+      submit: true,
+      note: null,
+      resolveThreads: true,
+    });
+
+  it("keeps a table cell on one line and escapes pipes", () => {
+    const draft = build(true, "Use a | b\ninstead of c. Then more.");
+    expect(draft.body).toContain(
+      "| F4 | 🟡 risk `src/a.ts:5` Use a \\| b instead of c. | 🟠 partly fixed |",
+    );
+    expect(draft.replies).toEqual([
+      expect.objectContaining({ id: "F4", threadId: "T4", resolve: false }),
+    ]);
+  });
+
+  it("says when history was rewritten", () => {
+    expect(build(true).body).toContain("round 3 · changes since `aaaaaaa`");
+    expect(build(false).body).toContain("history was rewritten since `aaaaaaa`");
   });
 });

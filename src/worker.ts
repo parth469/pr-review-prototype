@@ -1,13 +1,26 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Config } from "./config.ts";
+import {
+  type FollowUpContext,
+  finalizeFollowUp,
+  type LedgerEntry,
+  type PostedFile,
+  prepareFollowUp,
+} from "./followup.ts";
 import type { Logger } from "./log.ts";
 import { loadPrompt } from "./prompt.ts";
-import type { Publisher, PublishOptions } from "./publisher.ts";
-import { renderReviewMarkdown } from "./report.ts";
-import type { ReviewRun, RunReview } from "./reviewer.ts";
+import { reviewMarker } from "./publish.ts";
+import {
+  PENDING_REASON,
+  PENDING_RECHECK_MS,
+  type Publisher,
+  type PublishOptions,
+} from "./publisher.ts";
+import { numberFindings, renderReviewMarkdown } from "./report.ts";
+import type { ReviewRun, RunFollowUp, RunReview } from "./reviewer.ts";
 import type { Job, State } from "./state.ts";
-import type { PostedReview } from "./types.ts";
+import type { FollowUpSource, PostedReview } from "./types.ts";
 import { HeadMovedError, type PreparedWorkspace, type Workspace } from "./workspace.ts";
 
 export interface WorkerDeps {
@@ -23,11 +36,33 @@ export interface WorkerDeps {
   onEvent?: (event: WorkerEvent) => void;
   /** While true, reviews still run but wait as `reviewed` instead of being posted. */
   isPostingPaused?: () => boolean;
+  /** Round two and later. Without it every commit gets a first review. */
+  followUp?: { source: FollowUpSource; run: RunFollowUp; viewer: string };
+  /**
+   * Your unsubmitted pending review on the PR, if any. GitHub allows only one, so a review
+   * could not be posted while it exists: the job waits instead of running Claude for nothing.
+   */
+  findPendingReview?: (job: Job) => Promise<{ body: string } | undefined>;
 }
 
 export type WorkerEvent =
-  | { type: "posted"; job: Job; review: PostedReview; run: ReviewRun }
+  | {
+      type: "posted";
+      job: Job;
+      review: PostedReview;
+      run: ReviewRun;
+      /** Left as a draft for you, with the reason. */
+      needsYou?: string | null;
+    }
   | { type: "failed"; job: Job; step: "review" | "posting"; error: string };
+
+async function readJson<T>(path: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface Worker {
   /**
@@ -54,61 +89,157 @@ export function createWorker(deps: WorkerDeps): Worker {
   const { state, workspace, runReview, publisher, config, log } = deps;
   let wake: (() => void) | undefined;
 
+  /**
+   * For a PR you reviewed before: gather the earlier findings, replies and changes since.
+   * Without a context it is a full review instead (no earlier review saved, or too much
+   * changed); `carried` are the earlier bugs and risks still open, kept for the next round.
+   */
+  async function planFollowUp(
+    job: Job,
+    prepared: PreparedWorkspace,
+    fields: Fields,
+  ): Promise<{ context?: FollowUpContext; carried?: LedgerEntry[]; nextId?: number }> {
+    const followUp = deps.followUp;
+    if (!followUp || !config.followUp.enabled || !job.parent_job_id) return {};
+    const parent = state.get(job.parent_job_id);
+    const parentDir = parent?.output_dir;
+    const parentRun = parentDir
+      ? await readJson<ReviewRun>(join(parentDir, "result.json"))
+      : undefined;
+    if (!parent || !parentDir || !parentRun) {
+      log.warn(
+        { ...fields, parent: job.parent_job_id },
+        "earlier review not saved, reviewing from scratch",
+      );
+      return {};
+    }
+    const posted = await readJson<PostedFile>(join(parentDir, "posted.json"));
+    const plan = await prepareFollowUp(
+      { source: followUp.source, viewer: followUp.viewer, log },
+      {
+        job,
+        parent,
+        parentRun,
+        ...(posted ? { posted } : {}),
+        prAuthor: prepared.pr.author,
+        diff: prepared.diff,
+        dir: prepared.dir,
+        settings: config.followUp,
+      },
+    );
+    if (plan.kind === "fresh") {
+      log.info(
+        { ...fields, reason: plan.reason, carried: plan.carried.map((e) => e.id) },
+        "full review instead of a follow-up",
+      );
+      return { carried: plan.carried, nextId: plan.nextId };
+    }
+    return { context: plan.context };
+  }
+
   /** Check out, run Claude, save outputs. Returns the run, or undefined if the job stopped. */
   async function review(
-    job: Job,
+    queued: Job,
     fields: Fields,
     signal?: AbortSignal,
   ): Promise<{ run: ReviewRun; outDir: string } | undefined> {
-    log.info({ ...fields, attempt: job.attempts + 1 }, "preparing");
+    // An earlier commit may have been posted since this one was queued.
+    const job = state.linkParent(queued.id) ?? queued;
+    log.info({ ...fields, round: job.round, attempt: job.attempts + 1 }, "preparing");
     let prepared: PreparedWorkspace | undefined;
     try {
       prepared = await workspace.prepare(job);
       state.setStatus(job.id, "reviewing");
+      const { context, carried = [], nextId = 1 } = await planFollowUp(job, prepared, fields);
 
       const outDir = resolve(config.reviewsDir, prepared.slug);
       await mkdir(outDir, { recursive: true });
-      const prompt = await loadPrompt(config.review.promptFile, {
+      const vars = {
         skill: config.review.skill,
         repo: job.repo,
         number: job.pr,
         sha: job.head_sha,
         baseRef: prepared.pr.baseRef,
-      });
+      };
+      const prompt = context
+        ? await loadPrompt(config.followUp.promptFile, {
+            ...vars,
+            round: job.round,
+            prevSha: context.prevSha.slice(0, 7),
+            ids: context.toCheck.map((e) => e.id).join(", ") || "none",
+            sinceNote: context.linear
+              ? ""
+              : "History was rewritten since then (force-push), so `.review/since-last.patch` is the whole PR diff.",
+          })
+        : await loadPrompt(config.review.promptFile, vars);
+      const inputs = context ? ["previous.json", "threads.json", "since-last.patch"] : [];
       await Promise.all([
         writeFile(join(outDir, "prompt.md"), prompt),
         writeFile(join(outDir, "diff.patch"), prepared.diff),
         writeFile(join(outDir, "pr.json"), json(prepared.pr)),
+        ...inputs.map(async (name) =>
+          writeFile(join(outDir, name), await readFile(join(prepared?.dir ?? "", ".review", name))),
+        ),
       ]);
 
       log.info(
-        { ...fields, model: config.review.model, effort: config.review.effort },
+        {
+          ...fields,
+          round: job.round,
+          followUp: Boolean(context),
+          model: config.review.model,
+          effort: config.review.effort,
+        },
         "reviewing",
       );
-      const run = await runReview({
+      const input = {
         cwd: prepared.dir,
         prompt,
         settings: config.review,
         pluginPath: await deps.pluginPath(),
         transcriptPath: join(outDir, "transcript.jsonl"),
         ...(signal ? { signal } : {}),
-      });
+      };
+      let run: ReviewRun;
+      if (context && deps.followUp) {
+        const { output, ...stats } = await deps.followUp.run(input);
+        run = { ...stats, ...finalizeFollowUp(context, output, prepared.diff, log) };
+      } else {
+        const first = await runReview(input);
+        // After earlier rounds, new ids continue after theirs so every F-id stays unique.
+        run = {
+          ...first,
+          review: { ...first.review, findings: numberFindings(first.review.findings, nextId) },
+          ...(carried.length > 0 ? { carried } : {}),
+        };
+      }
 
       await Promise.all([
         writeFile(join(outDir, "result.json"), json(run)),
         writeFile(join(outDir, "review.md"), renderReviewMarkdown(prepared.pr, run)),
       ]);
+      // Open points: earlier findings not settled yet, plus anything new.
+      const open =
+        (run.followUp?.previous.filter(
+          (p) => p.verdict === "not_fixed" || p.verdict === "partly_fixed",
+        ).length ?? 0) +
+        (run.carried?.length ?? 0) +
+        run.review.findings.length;
       state.completeReview(job.id, {
-        findings: run.review.findings.length,
+        findings: open,
         outputDir: outDir,
         costUsd: run.costUsd,
         durationMs: run.durationMs,
       });
+      const verdicts: Record<string, number> = {};
+      for (const p of run.followUp?.previous ?? [])
+        verdicts[p.verdict] = (verdicts[p.verdict] ?? 0) + 1;
       log.info(
         {
           ...fields,
           verdict: run.review.verdict,
           findings: run.review.findings.length,
+          ...(run.followUp ? { round: job.round, verdicts } : {}),
           costUsd: run.costUsd,
           minutes: Number((run.durationMs / 60_000).toFixed(1)),
           output: outDir,
@@ -152,10 +283,12 @@ export function createWorker(deps: WorkerDeps): Worker {
         case "posted":
         case "existing": {
           const { review } = result;
+          const needsYou = result.kind === "posted" ? (result.needsYou ?? null) : null;
           state.completePublish(job.id, {
             reviewId: review.id,
             url: review.url,
             event: review.state,
+            ...(needsYou ? { reason: `needs your OK: ${needsYou}` } : {}),
           });
           log.info(
             {
@@ -167,14 +300,22 @@ export function createWorker(deps: WorkerDeps): Worker {
                     inline: result.draft.comments.length,
                     inBody: result.draft.outside.length,
                     inlineDropped: result.inlineDropped,
+                    ...("replies" in result.draft ? { replies: result.draft.replies.length } : {}),
+                    ...(needsYou ? { needsYou } : {}),
                   }
                 : {}),
             },
             result.kind === "posted" ? "posted" : "already posted",
           );
-          if (result.kind === "posted") deps.onEvent?.({ type: "posted", job, review, run });
+          if (result.kind === "posted") {
+            deps.onEvent?.({ type: "posted", job, review, run, needsYou });
+          }
           break;
         }
+        case "wait":
+          state.defer(job.id, result.retryAt, result.reason, undefined, { ci: result.ci ?? true });
+          log.info({ ...fields, reason: result.reason, retryAt: result.retryAt }, "posting later");
+          break;
         case "dry-run":
           state.completePublish(job.id, {
             reviewId: null,
@@ -198,6 +339,24 @@ export function createWorker(deps: WorkerDeps): Worker {
       });
       logFailure(after, err, fields, "posting");
     }
+  }
+
+  /** True if a pending review of yours would stop this one being posted; the job then waits. */
+  async function blockedByPending(job: Job, fields: Fields): Promise<boolean> {
+    if (!deps.findPendingReview || config.publish.mode === "dry-run") return false;
+    let pending: { body: string } | undefined;
+    try {
+      pending = await deps.findPendingReview(job);
+    } catch (err) {
+      log.warn({ ...fields, err }, "could not check for a pending review, reviewing anyway");
+      return false;
+    }
+    // Our own pending review of this commit is resumed by the publisher, not waited on.
+    if (!pending || pending.body.includes(reviewMarker(job.head_sha))) return false;
+    const retryAt = new Date(Date.now() + PENDING_RECHECK_MS);
+    state.defer(job.id, retryAt, PENDING_REASON, undefined, { status: "queued", ci: false });
+    log.info({ ...fields, retryAt }, "pending review in the way, review later");
+    return true;
   }
 
   function logFailure(after: Job, err: unknown, fields: Fields, step: "review" | "posting"): void {
@@ -244,6 +403,7 @@ export function createWorker(deps: WorkerDeps): Worker {
       return state.get(job.id);
     }
 
+    if (await blockedByPending(job, fields)) return state.get(job.id);
     const reviewed = await review(job, fields, signal);
     if (reviewed && paused()) {
       log.info(fields, "review saved, posting paused");

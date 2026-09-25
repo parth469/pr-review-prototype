@@ -2,7 +2,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Octokit } from "octokit";
 import type { Logger } from "./log.ts";
-import type { GitHubClient, PullRequest, PullSource, ReviewTarget } from "./types.ts";
+import type {
+  CiState,
+  FollowUpSource,
+  GitHubClient,
+  PullRequest,
+  PullSource,
+  ReviewTarget,
+  ReviewThread,
+} from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,8 +53,85 @@ function splitRepo(repo: string): { owner: string; repo: string } {
   return { owner, repo: name };
 }
 
-export interface GitHub extends GitHubClient, PullSource, ReviewTarget {
+export interface GitHub extends GitHubClient, PullSource, ReviewTarget, FollowUpSource {
   getViewerLogin(): Promise<string>;
+  /** Your unsubmitted pending review on the PR, if any (only you can see it). */
+  findPendingReview(
+    repo: string,
+    number: number,
+    viewer: string,
+  ): Promise<{ id: number; body: string } | undefined>;
+}
+
+const THREADS_QUERY = `
+  query ($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 50, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id isResolved path line originalLine
+            comments(first: 100) {
+              nodes {
+                databaseId body createdAt
+                author { login }
+                pullRequestReview { databaseId }
+              }
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+interface ThreadsPage {
+  repository: {
+    pullRequest: {
+      reviewThreads: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: Array<{
+          id: string;
+          isResolved: boolean;
+          path: string;
+          line: number | null;
+          originalLine: number | null;
+          comments: {
+            nodes: Array<{
+              databaseId: number;
+              body: string;
+              createdAt: string;
+              author: { login: string } | null;
+              pullRequestReview: { databaseId: number } | null;
+            }>;
+          };
+        }>;
+      };
+    } | null;
+  } | null;
+}
+
+// Check run conclusions that mean CI is red. neutral, skipped and stale do not.
+const FAILED_CONCLUSIONS = new Set([
+  "failure",
+  "timed_out",
+  "cancelled",
+  "action_required",
+  "startup_failure",
+]);
+
+/** One state for all the checks and statuses of a commit. Any failure wins, then pending. */
+export function combineCi(
+  runs: Array<{ status: string; conclusion: string | null }>,
+  statuses: Array<{ state: string }>,
+): CiState {
+  if (runs.length === 0 && statuses.length === 0) return "none";
+  const failed =
+    runs.some((r) => r.status === "completed" && FAILED_CONCLUSIONS.has(r.conclusion ?? "")) ||
+    statuses.some((s) => s.state === "failure" || s.state === "error");
+  if (failed) return "failure";
+  const pending =
+    runs.some((r) => r.status !== "completed") || statuses.some((s) => s.state === "pending");
+  return pending ? "pending" : "success";
 }
 
 export function createGitHub(token: string, log: Logger): GitHub {
@@ -123,7 +208,20 @@ export function createGitHub(token: string, log: Logger): GitHub {
       const mine = reviews.find(
         (r) => r.user?.login.toLowerCase() === viewer.toLowerCase() && r.body?.includes(marker),
       );
-      return mine ? { id: mine.id, url: mine.html_url, state: mine.state } : undefined;
+      return mine
+        ? { id: mine.id, url: mine.html_url, state: mine.state, nodeId: mine.node_id }
+        : undefined;
+    },
+
+    async findPendingReview(repo, number, viewer) {
+      const reviews = await octokit.paginate(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+        { ...splitRepo(repo), pull_number: number, per_page: 100 },
+      );
+      const pending = reviews.find(
+        (r) => r.state === "PENDING" && r.user?.login.toLowerCase() === viewer.toLowerCase(),
+      );
+      return pending ? { id: pending.id, body: pending.body ?? "" } : undefined;
     },
 
     async createReview(repo, number, payload) {
@@ -131,7 +229,124 @@ export function createGitHub(token: string, log: Logger): GitHub {
         "POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
         { ...splitRepo(repo), pull_number: number, ...payload },
       );
-      return { id: Number(data.id), url: data.html_url, state: data.state };
+      return { id: Number(data.id), url: data.html_url, state: data.state, nodeId: data.node_id };
+    },
+
+    async submitReview(repo, number, reviewId, event) {
+      const { data } = await octokit.request(
+        "POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/events",
+        { ...splitRepo(repo), pull_number: number, review_id: reviewId, event },
+      );
+      return { id: Number(data.id), url: data.html_url, state: data.state, nodeId: data.node_id };
+    },
+
+    async listReviewThreads(repo, number) {
+      const { owner, repo: name } = splitRepo(repo);
+      const threads: ReviewThread[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: ThreadsPage = await octokit.graphql<ThreadsPage>(THREADS_QUERY, {
+          owner,
+          name,
+          number,
+          cursor,
+        });
+        const connection = page.repository?.pullRequest?.reviewThreads;
+        if (!connection) throw new Error(`${repo}#${number} not found`);
+        for (const t of connection.nodes) {
+          threads.push({
+            id: t.id,
+            isResolved: t.isResolved,
+            path: t.path,
+            line: t.line,
+            originalLine: t.originalLine,
+            comments: t.comments.nodes.map((c) => ({
+              id: c.databaseId,
+              author: c.author?.login ?? "ghost",
+              body: c.body,
+              createdAt: c.createdAt,
+              reviewId: c.pullRequestReview?.databaseId ?? null,
+            })),
+          });
+        }
+        cursor = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+      } while (cursor);
+      return threads;
+    },
+
+    async replyInThread(reviewNodeId, threadId, body) {
+      await octokit.graphql(
+        `mutation ($review: ID!, $thread: ID!, $body: String!) {
+           addPullRequestReviewThreadReply(
+             input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }
+           ) { comment { id } }
+         }`,
+        { review: reviewNodeId, thread: threadId, body },
+      );
+    },
+
+    async resolveThread(threadId) {
+      await octokit.graphql(
+        `mutation ($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`,
+        { id: threadId },
+      );
+    },
+
+    async listIssueComments(repo, number, since) {
+      const comments = await octokit.paginate(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
+        { ...splitRepo(repo), issue_number: number, since, per_page: 100 },
+      );
+      return comments.map((c) => ({
+        author: c.user?.login ?? "ghost",
+        body: c.body ?? "",
+        createdAt: c.created_at,
+      }));
+    },
+
+    async compareCommits(repo, base, head) {
+      const route = "GET /repos/{owner}/{repo}/compare/{basehead}";
+      const params = { ...splitRepo(repo), basehead: `${base}...${head}` };
+      try {
+        const { data } = await octokit.request(route, { ...params, per_page: 1 });
+        // "ahead": head builds on base. Anything else means history was rewritten.
+        if (data.status !== "ahead" && data.status !== "identical") {
+          return { linear: false, patch: "" };
+        }
+      } catch (err) {
+        // The old commit is gone after a force-push.
+        if ((err as { status?: number }).status === 404) return { linear: false, patch: "" };
+        throw err;
+      }
+      const { data } = await octokit.request(route, { ...params, mediaType: { format: "diff" } });
+      // With the diff media type the body is the raw patch text.
+      return { linear: true, patch: data as unknown as string };
+    },
+
+    async getReview(repo, number, reviewId) {
+      try {
+        const { data } = await octokit.request(
+          "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}",
+          { ...splitRepo(repo), pull_number: number, review_id: reviewId },
+        );
+        return { state: data.state, submittedAt: data.submitted_at ?? null };
+      } catch (err) {
+        // A pending review that was deleted is gone for good.
+        if ((err as { status?: number }).status === 404) return undefined;
+        throw err;
+      }
+    },
+
+    async getCiState(repo, sha) {
+      const ref = { ...splitRepo(repo), ref: sha };
+      const [runs, status] = await Promise.all([
+        octokit.paginate("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
+          ...ref,
+          per_page: 100,
+        }),
+        octokit.request("GET /repos/{owner}/{repo}/commits/{ref}/status", ref),
+      ]);
+      return combineCi(runs, status.data.statuses);
     },
 
     async getPullDiff(repo, number) {

@@ -33,6 +33,11 @@ export interface Job {
   duration_ms: number | null;
   review_url: string | null;
   event: string | null;
+  /** 1 for a first review; 2+ for a follow-up that checks the review of parent_job_id. */
+  round: number;
+  parent_job_id: number | null;
+  /** When posting started waiting for CI, so the wait has an end. */
+  waiting_since: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,6 +92,9 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE jobs ADD COLUMN review_url TEXT;
    ALTER TABLE jobs ADD COLUMN event TEXT;`,
   `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  `ALTER TABLE jobs ADD COLUMN round INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE jobs ADD COLUMN parent_job_id INTEGER;
+   ALTER TABLE jobs ADD COLUMN waiting_since TEXT;`,
 ];
 
 export interface PublishOutcome {
@@ -138,6 +146,23 @@ export interface State {
     maxAttempts: number,
     options?: { now?: Date; retryStatus?: "queued" | "reviewed" },
   ): Job;
+  /**
+   * Point a job at the latest earlier commit of the same PR whose review is on GitHub, making it
+   * a follow-up (round = parent's + 1), or back to round 1 if there is none. Returns the job.
+   */
+  linkParent(id: number): Job | undefined;
+  /**
+   * Hold a job until `until` without using up an attempt, e.g. while CI runs. It waits as
+   * `status` (default "reviewed"). A CI wait (`ci`, the default) remembers its start in
+   * waiting_since; other waits leave that clock alone.
+   */
+  defer(
+    id: number,
+    until: Date,
+    reason: string,
+    now?: Date,
+    options?: { status?: "queued" | "reviewed"; ci?: boolean },
+  ): void;
   /** Put jobs left mid-flight by a crash back where they can resume. Returns how many. */
   recoverStale(): number;
   get(id: number): Job | undefined;
@@ -177,7 +202,7 @@ export function openState(path: string): State {
   );
   const requeueManual = db.prepare(
     `UPDATE jobs SET status = 'queued', reason = NULL, error = NULL, attempts = 0,
-       next_attempt_at = NULL, title = ?, updated_at = ?
+       next_attempt_at = NULL, waiting_since = NULL, title = ?, updated_at = ?
      WHERE id = ?`,
   );
   const nextStep = `status = CASE status WHEN 'queued' THEN 'preparing' ELSE 'posting' END`;
@@ -203,7 +228,7 @@ export function openState(path: string): State {
   );
   const reset = db.prepare(
     `UPDATE jobs SET status = ?, reason = NULL, error = NULL, attempts = 0,
-       next_attempt_at = NULL, updated_at = ?
+       next_attempt_at = NULL, waiting_since = NULL, updated_at = ?
      WHERE id = ?`,
   );
   const selectRecent = db.prepare("SELECT * FROM jobs ORDER BY updated_at DESC, id DESC LIMIT ?");
@@ -240,9 +265,62 @@ export function openState(path: string): State {
      WHERE status IN ('preparing', 'reviewing', 'posting')`,
   );
   const selectByStatus = db.prepare("SELECT * FROM jobs WHERE status = ? ORDER BY id");
+  // Only a review that reached GitHub can be followed up; later commits never parent earlier ones.
+  const lastPosted = db.prepare(
+    `SELECT * FROM jobs
+     WHERE repo = ? AND pr = ? AND head_sha <> ? AND id < ? AND status = 'done'
+       AND review_id IS NOT NULL
+     ORDER BY id DESC LIMIT 1`,
+  );
+  const setParent = db.prepare(
+    "UPDATE jobs SET parent_job_id = ?, round = ?, updated_at = ? WHERE id = ?",
+  );
+  const deferStmt = db.prepare(
+    `UPDATE jobs SET status = ?, reason = ?, next_attempt_at = ?,
+       waiting_since = CASE WHEN ? THEN COALESCE(waiting_since, ?) ELSE waiting_since END,
+       updated_at = ?
+     WHERE id = ?`,
+  );
 
   const toJob = (row: unknown) => row as Job | undefined;
   const iso = (d: Date = new Date()) => d.toISOString();
+
+  function linkParent(id: number): Job | undefined {
+    const job = toJob(getJob.get(id));
+    if (!job) return undefined;
+    const parent = toJob(lastPosted.get(job.repo, job.pr, job.head_sha, job.id));
+    const parentId = parent?.id ?? null;
+    const round = parent ? parent.round + 1 : 1;
+    if (parentId !== job.parent_job_id || round !== job.round) {
+      setParent.run(parentId, round, iso(), id);
+    }
+    return toJob(getJob.get(id));
+  }
+
+  function insertLinked(input: {
+    repo: string;
+    pr: number;
+    headSha: string;
+    title: string;
+    url: string;
+    status: JobStatus;
+    reason: string | null;
+    now: string;
+  }): void {
+    const { repo, pr, headSha, title, url, status, reason, now } = input;
+    const { lastInsertRowid } = insertJob.run(
+      repo,
+      pr,
+      headSha,
+      title,
+      url,
+      status,
+      reason,
+      now,
+      now,
+    );
+    linkParent(Number(lastInsertRowid));
+  }
 
   return {
     recordSeen({ repo, pr, headSha, title, url, decision }) {
@@ -254,7 +332,7 @@ export function openState(path: string): State {
       if (!existing) {
         // A new push makes any older commit of this PR that is still waiting pointless.
         supersede.run(now, repo, pr, headSha);
-        insertJob.run(repo, pr, headSha, title, url, status, reason, now, now);
+        insertLinked({ repo, pr, headSha, title, url, status, reason, now });
         return "new";
       }
       if (existing.status !== "skipped") return "known";
@@ -275,7 +353,7 @@ export function openState(path: string): State {
       const existing = toJob(findJob.get(repo, pr, headSha));
       if (!existing) {
         supersede.run(now, repo, pr, headSha);
-        insertJob.run(repo, pr, headSha, title, url, "queued", null, now, now);
+        insertLinked({ repo, pr, headSha, title, url, status: "queued", reason: null, now });
       } else if (!["preparing", "reviewing", "posting"].includes(existing.status)) {
         requeueManual.run(title, now, existing.id);
       }
@@ -317,6 +395,12 @@ export function openState(path: string): State {
       const nextAt = giveUp ? null : iso(new Date(now.getTime() + delay));
       fail.run(giveUp ? "failed" : retryStatus, attempts, error, nextAt, iso(now), id);
       return toJob(getJob.get(id)) as Job;
+    },
+
+    linkParent,
+
+    defer(id, until, reason, now = new Date(), { status = "reviewed", ci = true } = {}) {
+      deferStmt.run(status, reason, iso(until), ci ? 1 : 0, iso(now), iso(now), id);
     },
 
     recoverStale() {

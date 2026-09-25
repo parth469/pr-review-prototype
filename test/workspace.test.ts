@@ -9,7 +9,22 @@ import { createWorkspace, HeadMovedError, jobSlug } from "../src/workspace.ts";
 import { makePr } from "./helpers.ts";
 
 const commit = (cwd: string, msg: string) =>
-  git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", msg], { cwd });
+  git(
+    // No signing: a global commit.gpgsign would wait on a key prompt and time the test out.
+    [
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-am",
+      msg,
+    ],
+    { cwd },
+  );
 
 // A local "GitHub": a repo with main and a PR head published as refs/pull/1/head.
 async function makeOrigin(): Promise<{ dir: string; headSha: string }> {
@@ -36,6 +51,9 @@ function job(headSha: string): Job {
     title: "t",
     url: "u",
     status: "preparing",
+    round: 1,
+    parent_job_id: null,
+    waiting_since: null,
     reason: null,
     attempts: 0,
     review_id: null,

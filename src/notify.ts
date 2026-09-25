@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Logger } from "./log.ts";
 import { countFindings } from "./publish.ts";
+import type { ReviewRun, Verdict } from "./reviewer.ts";
 import type { WorkerEvent } from "./worker.ts";
 
 const execFileAsync = promisify(execFile);
@@ -59,14 +60,45 @@ export function buildToastScript(notification: Notification): string {
 const POSTED_TITLE: Record<string, string> = {
   CHANGES_REQUESTED: "Requested changes",
   COMMENTED: "Commented",
+  APPROVED: "Approved",
   PENDING: "Draft review ready",
 };
+
+const VERDICT_WORD: Record<Verdict, string> = {
+  fixed: "fixed",
+  explained: "explained",
+  no_longer_applies: "gone",
+  partly_fixed: "partly fixed",
+  not_fixed: "open",
+};
+
+/** "3 fixed · 1 open · 1 new risk" for a follow-up. */
+function followUpCounts(run: ReviewRun): string {
+  const counts = new Map<string, number>();
+  for (const p of run.followUp?.previous ?? []) {
+    const word = VERDICT_WORD[p.verdict];
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  const parts = [...counts].map(([word, n]) => `${n} ${word}`);
+  const fresh = countFindings(run.review.findings);
+  if (fresh) parts.push(`new: ${fresh}`);
+  return parts.join(" · ") || "Nothing left to check";
+}
 
 /** The desktop notification for a worker event. */
 export function notificationFor(event: WorkerEvent): Notification {
   const ref = `${event.job.repo}#${event.job.pr}`;
   if (event.type === "posted") {
-    const counts = countFindings(event.run.review.findings) || "No issues found";
+    const counts = event.run.followUp
+      ? followUpCounts(event.run)
+      : countFindings(event.run.review.findings) || "No issues found";
+    if (event.needsYou) {
+      return {
+        title: `Needs your OK · ${ref}`,
+        body: `${event.needsYou} — ${event.job.title}`.slice(0, 250),
+        url: event.review.url,
+      };
+    }
     return {
       title: `${POSTED_TITLE[event.review.state] ?? "Reviewed"} · ${ref}`,
       body: `${counts} — ${event.job.title}`,

@@ -171,6 +171,14 @@ describe("worker", () => {
     }
     const md = readFileSync(join(out, "review.md"), "utf8");
     expect(md.indexOf("🔴 bug")).toBeLessThan(md.indexOf("🔵 nit")); // most severe first
+    // Numbered most severe first, so a follow-up can name each one.
+    const saved = JSON.parse(readFileSync(join(out, "result.json"), "utf8"));
+    expect(
+      saved.review.findings.map((f: { id: string; severity: string }) => [f.id, f.severity]),
+    ).toEqual([
+      ["F1", "bug"],
+      ["F2", "nit"],
+    ]);
     expect(readFileSync(join(out, "prompt.md"), "utf8").startsWith("/caveman:caveman-review")).toBe(
       true,
     );

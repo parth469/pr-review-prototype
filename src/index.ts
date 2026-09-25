@@ -9,7 +9,7 @@ import { createNotifier, notificationFor } from "./notify.ts";
 import { pollOnce, startPolling } from "./poller.ts";
 import { PreflightError, runPreflight } from "./preflight.ts";
 import { createPublisher } from "./publisher.ts";
-import { createReviewer, resolvePluginPath } from "./reviewer.ts";
+import { createFollowUpReviewer, createReviewer, resolvePluginPath } from "./reviewer.ts";
 import { createRuntime, isPostingPaused, recordPoll } from "./runtime.ts";
 import { openState } from "./state.ts";
 import { EXIT_PREFLIGHT } from "./supervisor.ts";
@@ -94,6 +94,8 @@ try {
     log,
     pluginPath: getPluginPath,
     isPostingPaused: () => isPostingPaused(state),
+    followUp: { source: github, run: createFollowUpReviewer(), viewer },
+    findPendingReview: (job) => (github as GitHub).findPendingReview(job.repo, job.pr, viewer),
     onEvent: (event) => {
       const wanted = event.type === "posted" ? config.notify.onPosted : config.notify.onFailed;
       if (wanted) void notifier.notify(notificationFor(event));
@@ -118,6 +120,7 @@ try {
       intervalSec: config.pollIntervalSec,
       reviews: config.review.enabled,
       publish: config.publish.mode,
+      followUp: config.followUp.enabled,
     },
     "proxy reviewer started",
   );

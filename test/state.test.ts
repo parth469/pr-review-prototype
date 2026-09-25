@@ -229,6 +229,122 @@ describe("state", () => {
     });
   });
 
+  describe("follow-up rounds", () => {
+    let state: State;
+    beforeEach(() => {
+      state = openState(":memory:");
+    });
+    afterEach(() => state.close());
+
+    /** Record a commit and take it all the way to a posted review. */
+    function post(headSha: string, reviewId: number | null = 900) {
+      state.recordSeen({ ...base, headSha });
+      const job = state.claimNext();
+      if (!job) throw new Error("nothing to claim");
+      state.completeReview(job.id, { findings: 1, outputDir: "o", costUsd: 1, durationMs: 1 });
+      state.claimById(job.id);
+      state.completePublish(job.id, { reviewId, url: "u", event: "CHANGES_REQUESTED" });
+      return state.get(job.id);
+    }
+
+    it("makes a new commit on a PR with a posted review a follow-up", () => {
+      const first = post("aaa1111");
+      expect(first).toMatchObject({ round: 1, parent_job_id: null });
+      state.recordSeen({ ...base, headSha: "bbb2222" });
+      const second = state.listByStatus("queued")[0];
+      expect(second).toMatchObject({ round: 2, parent_job_id: first?.id });
+
+      const secondPosted = post("ccc3333");
+      expect(secondPosted).toMatchObject({ round: 2, parent_job_id: first?.id });
+    });
+
+    it("counts rounds along the chain", () => {
+      post("aaa1111");
+      const two = post("bbb2222");
+      state.recordSeen({ ...base, headSha: "ccc3333" });
+      expect(state.listByStatus("queued")[0]).toMatchObject({ round: 3, parent_job_id: two?.id });
+    });
+
+    it("does not follow up a dry run, which never reached GitHub", () => {
+      post("aaa1111", null);
+      state.recordSeen({ ...base, headSha: "bbb2222" });
+      expect(state.listByStatus("queued")[0]).toMatchObject({ round: 1, parent_job_id: null });
+    });
+
+    it("links a parent posted after the job was queued", () => {
+      state.recordSeen({ ...base, headSha: "aaa1111" });
+      const first = state.claimNext();
+      state.recordSeen({ ...base, headSha: "bbb2222" }); // queued while the first is reviewing
+      const second = state.listByStatus("queued")[0];
+      expect(second?.round).toBe(1);
+      if (!first || !second) throw new Error("missing jobs");
+      state.completeReview(first.id, { findings: 1, outputDir: "o", costUsd: 1, durationMs: 1 });
+      state.claimById(first.id);
+      state.completePublish(first.id, { reviewId: 1, url: "u", event: "COMMENTED" });
+      expect(state.linkParent(second.id)).toMatchObject({ round: 2, parent_job_id: first.id });
+    });
+
+    it("never makes a later commit the parent of an earlier job", () => {
+      state.recordSeen({ ...base, headSha: "aaa1111" });
+      const early = state.listByStatus("queued")[0];
+      post("bbb2222");
+      if (!early) throw new Error("missing job");
+      expect(state.linkParent(early.id)).toMatchObject({ round: 1, parent_job_id: null });
+    });
+
+    it("holds a reviewed job without using an attempt, remembering when waiting began", () => {
+      state.recordSeen(base);
+      const job = state.claimNext();
+      if (!job) throw new Error("nothing to claim");
+      state.completeReview(job.id, { findings: 0, outputDir: "o", costUsd: 1, durationMs: 1 });
+      state.claimById(job.id);
+      const t0 = new Date("2026-09-25T10:00:00Z");
+      state.defer(job.id, new Date("2026-09-25T10:05:00Z"), "waiting for CI", t0);
+      expect(state.get(job.id)).toMatchObject({
+        status: "reviewed",
+        reason: "waiting for CI",
+        attempts: 0,
+        next_attempt_at: "2026-09-25T10:05:00.000Z",
+        waiting_since: "2026-09-25T10:00:00.000Z",
+      });
+      expect(state.claimNext(new Date("2026-09-25T10:04:00Z"))).toBeUndefined();
+
+      state.claimNext(new Date("2026-09-25T10:06:00Z"));
+      state.defer(
+        job.id,
+        new Date("2026-09-25T10:11:00Z"),
+        "waiting for CI",
+        new Date("2026-09-25T10:06:00Z"),
+      );
+      expect(state.get(job.id)?.waiting_since).toBe("2026-09-25T10:00:00.000Z");
+
+      state.resetJob(job.id, "queued", ["reviewed"]);
+      expect(state.get(job.id)?.waiting_since).toBeNull();
+    });
+
+    it("can hold a queued job for a wait that is not about CI", () => {
+      state.recordSeen(base);
+      const job = state.claimNext();
+      if (!job) throw new Error("nothing to claim");
+      const t0 = new Date("2026-09-25T10:00:00Z");
+      state.defer(job.id, new Date("2026-09-25T10:15:00Z"), "pending review", t0, {
+        status: "queued",
+        ci: false,
+      });
+      expect(state.get(job.id)).toMatchObject({
+        status: "queued",
+        reason: "pending review",
+        attempts: 0,
+        next_attempt_at: "2026-09-25T10:15:00.000Z",
+        waiting_since: null,
+      });
+      expect(state.claimNext(new Date("2026-09-25T10:14:00Z"))).toBeUndefined();
+      expect(state.claimNext(new Date("2026-09-25T10:16:00Z"))).toMatchObject({
+        status: "preparing",
+      });
+    });
+  });
+
   it("upgrades an M1 database in place", () => {
     const path = join(mkdtempSync(join(tmpdir(), "proxy-state-")), "state.db");
     const v1 = new DatabaseSync(path);
@@ -242,7 +358,13 @@ describe("state", () => {
     v1.close();
 
     const upgraded = openState(path);
-    expect(upgraded.listByStatus("queued")[0]).toMatchObject({ pr: 1, next_attempt_at: null });
+    expect(upgraded.listByStatus("queued")[0]).toMatchObject({
+      pr: 1,
+      next_attempt_at: null,
+      round: 1,
+      parent_job_id: null,
+      waiting_since: null,
+    });
     expect(upgraded.claimNext()?.pr).toBe(1);
     upgraded.close();
   });

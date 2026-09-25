@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommentableLines } from "../src/diff.ts";
+import { filterPatch, parseAddedLines, parseCommentableLines, touchedFiles } from "../src/diff.ts";
 
 const lines = (patch: string, path: string) => [...(parseCommentableLines(patch).get(path) ?? [])];
 
@@ -98,5 +98,53 @@ describe("parseCommentableLines", () => {
       "+++ not a header",
     ].join("\n");
     expect(lines(patch, "a.md")).toEqual([1]);
+  });
+});
+
+const TWO_FILES = [
+  "diff --git a/src/a.ts b/src/a.ts",
+  "--- a/src/a.ts",
+  "+++ b/src/a.ts",
+  "@@ -10,4 +10,5 @@",
+  " keep10",
+  "-old11",
+  "+new11",
+  "+new12",
+  " keep13",
+  " keep14",
+  "diff --git a/gone.ts b/gone.ts",
+  "deleted file mode 100644",
+  "--- a/gone.ts",
+  "+++ /dev/null",
+  "@@ -1,1 +0,0 @@",
+  "-bye",
+  "diff --git a/old.ts b/new.ts",
+  "similarity index 100%",
+  "rename from old.ts",
+  "rename to new.ts",
+].join("\n");
+
+describe("parseAddedLines", () => {
+  it("keeps only added lines, never context", () => {
+    expect([...(parseAddedLines(TWO_FILES).get("src/a.ts") ?? [])]).toEqual([11, 12]);
+  });
+});
+
+describe("touchedFiles", () => {
+  it("lists files with added or removed lines, including deleted files", () => {
+    expect(touchedFiles(TWO_FILES)).toEqual(new Set(["src/a.ts", "gone.ts"]));
+  });
+});
+
+describe("filterPatch", () => {
+  it("keeps only the sections of the given files, by old or new name", () => {
+    const kept = filterPatch(TWO_FILES, new Set(["gone.ts", "new.ts"]));
+    expect(kept).not.toContain("src/a.ts");
+    expect(kept).toContain("+++ /dev/null");
+    expect(kept).toContain("rename to new.ts");
+  });
+
+  it("keeps nothing when no file matches", () => {
+    expect(filterPatch(TWO_FILES, new Set(["other.ts"]))).toBe("");
   });
 });

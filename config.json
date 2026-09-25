@@ -1,7 +1,7 @@
 {
   "pollIntervalSec": 60,
   "repos": {
-    "allow": ["*"],
+    "allow": ["Axy-Science/Axy-K-Git"],
     "deny": []
   },
   "skipDrafts": true,

@@ -47,6 +47,27 @@ export const configSchema = z.object({
       requireStillRequested: z.boolean().default(true),
     })
     .prefault({}),
+  followUp: z
+    .object({
+      // Re-requested review on a PR you reviewed before: check the earlier findings, then decide.
+      enabled: z.boolean().default(true),
+      promptFile: z.string().min(1).default("prompts/follow-up.md"),
+      // submit: approve at once · pending: leave every approval as a draft for you to submit
+      approve: z.enum(["submit", "pending"]).default("submit"),
+      // An "explained" bug is not accepted without you: the approval waits as a draft.
+      explainedBugNeedsYou: z.boolean().default(true),
+      // Same for an "explained" risk: the author's word alone never approves it.
+      explainedRiskNeedsYou: z.boolean().default(true),
+      // Never approve on red CI; wait for running checks up to ciWaitMin.
+      requireGreenCi: z.boolean().default(true),
+      ciWaitMin: z.number().int().min(0).default(60),
+      // Rounds after this one are only posted as a draft for you, to stop endless back and forth.
+      maxAutoRounds: z.number().int().min(2).default(3),
+      // A push this big since the last review gets a fresh full review instead.
+      freshReviewOverLines: z.number().int().positive().default(1000),
+      resolveThreads: z.boolean().default(true),
+    })
+    .prefault({}),
   statusPage: z
     .object({
       enabled: z.boolean().default(true),

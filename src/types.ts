@@ -38,7 +38,64 @@ export interface PullSource {
 export interface PostedReview {
   id: number;
   url: string;
-  state: string; // "CHANGES_REQUESTED" | "COMMENTED" | "PENDING" | ...
+  state: string; // "CHANGES_REQUESTED" | "COMMENTED" | "APPROVED" | "PENDING" | ...
+  /** GraphQL id, needed to add thread replies to the review. */
+  nodeId?: string;
+}
+
+/** Where one of our inline findings lives on GitHub, saved in posted.json after posting. */
+export interface ThreadRef {
+  threadId: string;
+  commentId: number;
+}
+
+export interface ThreadComment {
+  id: number;
+  author: string;
+  body: string;
+  createdAt: string;
+  /** The review the comment belongs to; null for a comment posted outside a review. */
+  reviewId: number | null;
+}
+
+/** An inline comment thread on a PR, as the GraphQL reviewThreads connection describes it. */
+export interface ReviewThread {
+  id: string;
+  isResolved: boolean;
+  path: string;
+  line: number | null;
+  originalLine: number | null;
+  comments: ThreadComment[];
+}
+
+export interface IssueComment {
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
+/** Changes from one commit to another, and whether the second still builds on the first. */
+export interface Comparison {
+  /** false after a force-push or rebase: the old commit is not an ancestor any more. */
+  linear: boolean;
+  patch: string;
+}
+
+/** Combined result of check runs and commit statuses. "none" = no CI configured. */
+export type CiState = "success" | "failure" | "pending" | "none";
+
+/** GitHub reads the worker needs to prepare a follow-up review. */
+export interface FollowUpSource {
+  listReviewThreads(repo: string, number: number): Promise<ReviewThread[]>;
+  /** PR conversation comments, oldest first, created at or after `since`. */
+  listIssueComments(repo: string, number: number, since: string): Promise<IssueComment[]>;
+  compareCommits(repo: string, base: string, head: string): Promise<Comparison>;
+  /** One review's state now; undefined if it was deleted. submittedAt is null while pending. */
+  getReview(
+    repo: string,
+    number: number,
+    reviewId: number,
+  ): Promise<{ state: string; submittedAt: string | null } | undefined>;
 }
 
 export interface CreateReviewPayload {
@@ -67,4 +124,18 @@ export interface ReviewTarget {
     marker: string,
   ): Promise<PostedReview | undefined>;
   createReview(repo: string, number: number, payload: CreateReviewPayload): Promise<PostedReview>;
+  listReviewThreads(repo: string, number: number): Promise<ReviewThread[]>;
+  /** Submit a pending review. */
+  submitReview(
+    repo: string,
+    number: number,
+    reviewId: number,
+    event: ReviewEventName,
+  ): Promise<PostedReview>;
+  /** Reply in a thread, as part of the given (pending) review. */
+  replyInThread(reviewNodeId: string, threadId: string, body: string): Promise<void>;
+  resolveThread(threadId: string): Promise<void>;
+  getCiState(repo: string, sha: string): Promise<CiState>;
 }
+
+export type ReviewEventName = "REQUEST_CHANGES" | "COMMENT" | "APPROVE";

@@ -78,6 +78,10 @@ tbody tr.selected { background: var(--sunken); box-shadow: inset 3px 0 0 var(--a
 .finding { border-top: 1px solid var(--line); padding: 10px 0; }
 .finding .loc { font-family: var(--mono); font-size: 12.5px; margin-left: 6px; }
 .finding p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.finding .why { color: var(--muted); font-size: 13px; }
+.fid { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
+.round { margin-left: 6px; }
+.detail h3 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 4px; }
 code { font-family: var(--mono); font-size: 12.5px; background: var(--sunken); border-radius: 4px; padding: 1px 4px; }
 .empty { color: var(--muted); padding: 24px 18px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
@@ -151,10 +155,17 @@ function describe(job) {
   if (s === "done") {
     if (job.reason === "dry-run") return ["Dry run", "quiet", "Nothing posted"];
     if (job.event === "CHANGES_REQUESTED") return ["Requested changes", "change"];
-    if (job.event === "PENDING") return ["Pending draft", "pending", "Only you can see it"];
+    if (job.event === "APPROVED") return ["Approved", "ok"];
+    if (job.event === "PENDING") {
+      return job.reason ? ["Needs your OK", "pending", job.reason.replace(/^needs your OK: /, "")] : ["Pending draft", "pending", "Only you can see it"];
+    }
     return ["Commented", "comment"];
   }
-  if (s === "reviewed") return paused ? ["Waiting to post", "pending", "Posting is paused"] : ["Posting soon", "work"];
+  if (s === "reviewed") {
+    if (paused) return ["Waiting to post", "pending", "Posting is paused"];
+    if (job.reason === "waiting for CI") return ["Waiting for CI", "work", "Next check " + time(job.next_attempt_at)];
+    return ["Posting soon", "work"];
+  }
   if (s === "queued") return job.next_attempt_at ? ["Retry at " + time(job.next_attempt_at), "work", job.error] : ["Queued", "quiet"];
   if (s === "preparing") return ["Checking out…", "work"];
   if (s === "reviewing") return ["Claude reviewing…", "work"];
@@ -218,9 +229,13 @@ function renderJobs(jobs) {
       statusCell.appendChild(link);
     }
     var row = el("tr", { tabindex: "0", class: job.id === selected ? "selected" : "" }, [
-      el("td", {}, [el("span", { class: "ref", text: job.repo + "#" + job.pr }), el("span", { class: "title", text: job.title, title: job.title })]),
+      el("td", {}, [
+        el("span", { class: "ref", text: job.repo + "#" + job.pr }),
+        job.round > 1 ? el("span", { class: "chip quiet round", text: "R" + job.round, title: "Follow-up review, round " + job.round }) : null,
+        el("span", { class: "title", text: job.title, title: job.title })
+      ]),
       statusCell,
-      el("td", { class: "num", text: job.findings == null ? "–" : job.findings + (job.findings === 1 ? " finding" : " findings") }),
+      el("td", { class: "num", text: job.findings == null ? "–" : job.findings + (job.round > 1 ? " open" : job.findings === 1 ? " finding" : " findings") }),
       el("td", { class: "num", text: job.cost_usd == null ? "–" : "$" + job.cost_usd.toFixed(2) }),
       el("td", { class: "num", text: time(job.updated_at) }),
       el("td", {}, actionsFor(job).map(function (a) { return actionButton(job, a); }))
@@ -242,6 +257,12 @@ function richText(tag, text, cls) {
 }
 var SEVERITY = { bug: ["🔴 bug", "change"], risk: ["🟡 risk", "work"], question: ["❓ question", "comment"], nit: ["🔵 nit", "quiet"] };
 var ORDER = ["bug", "risk", "question", "nit"];
+var VERDICT = { fixed: ["fixed", "ok"], explained: ["explained", "comment"], no_longer_applies: ["no longer applies", "quiet"], partly_fixed: ["partly fixed", "work"], not_fixed: ["not fixed", "change"] };
+function where(f) { return f.path + ":" + f.line + (f.endLine && f.endLine !== f.line ? "-" + f.endLine : ""); }
+function findingRow(f) {
+  var s = SEVERITY[f.severity] || [f.severity, "quiet"];
+  return el("div", { class: "finding" }, [f.id ? el("span", { class: "fid", text: f.id }) : null, el("span", { class: "chip " + s[1], text: s[0] }), el("span", { class: "loc", text: where(f) }), richText("p", f.body)]);
+}
 function renderDetail(data) {
   var job = data.job, run = data.review, d = describe(job);
   var parts = [
@@ -258,12 +279,28 @@ function renderDetail(data) {
   if (job.error) parts.push(el("p", { class: "summary", text: "Error: " + job.error }));
   if (run) {
     parts.push(richText("p", run.review.summary, "summary"));
+    var fu = run.followUp;
+    if (fu) {
+      parts.push(el("h3", { text: "Earlier findings · round " + fu.round + " · since " + fu.prevSha.slice(0, 7) + (fu.linear ? "" : " (history rewritten)") }));
+      fu.previous.forEach(function (p) {
+        var s = SEVERITY[p.severity] || [p.severity, "quiet"], v = VERDICT[p.verdict] || [p.verdict, "quiet"];
+        // Nits and questions never block: left alone they are only optional.
+        if ((p.severity === "nit" || p.severity === "question") && (p.verdict === "not_fixed" || p.verdict === "partly_fixed")) v = [v[0] + " · optional", "quiet"];
+        parts.push(el("div", { class: "finding" }, [
+          el("span", { class: "fid", text: p.id }), el("span", { class: "chip " + s[1], text: s[0] }), el("span", { class: "loc", text: where(p) }),
+          document.createTextNode(" → "), el("span", { class: "chip " + v[1], text: v[0] }),
+          richText("p", p.reply),
+          el("p", { class: "why", text: "Evidence: " + p.evidence }),
+          p.overruled ? el("p", { class: "why", text: "Overruled: " + p.overruled }) : null
+        ]));
+      });
+      if (!fu.previous.length) parts.push(el("p", { class: "summary", text: "Nothing left to check." }));
+      if (run.review.findings.length) parts.push(el("h3", { text: "New since the last review" }));
+    }
     run.review.findings.slice().sort(function (a, b) { return ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity); }).forEach(function (f) {
-      var s = SEVERITY[f.severity] || [f.severity, "quiet"];
-      var at = f.path + ":" + f.line + (f.endLine && f.endLine !== f.line ? "-" + f.endLine : "");
-      parts.push(el("div", { class: "finding" }, [el("span", { class: "chip " + s[1], text: s[0] }), el("span", { class: "loc", text: at }), richText("p", f.body)]));
+      parts.push(findingRow(f));
     });
-    if (!run.review.findings.length) parts.push(el("p", { class: "summary", text: "No findings." }));
+    if (!run.review.findings.length && !fu) parts.push(el("p", { class: "summary", text: "No findings." }));
   } else if (!job.error) {
     parts.push(el("p", { class: "summary", text: job.status === "skipped" ? "Not reviewed: " + (job.reason || "skipped") + "." : "No review saved yet." }));
   }

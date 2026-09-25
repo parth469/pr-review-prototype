@@ -68,6 +68,43 @@ describe("notificationFor", () => {
     });
   });
 
+  it("counts verdicts for a follow-up and says when it approved", () => {
+    const followUp = {
+      ...run,
+      review: { ...run.review, findings: [run.review.findings[0]] },
+      followUp: {
+        previous: [{ verdict: "fixed" }, { verdict: "fixed" }, { verdict: "not_fixed" }],
+      },
+    } as ReviewRun;
+    expect(
+      notificationFor({
+        type: "posted",
+        job,
+        run: followUp,
+        review: { id: 1, url: "https://r", state: "APPROVED" },
+      }),
+    ).toEqual({
+      title: "Approved · acme/api#128",
+      body: "2 fixed · 1 open · new: 1 bug — Fix session refresh",
+      url: "https://r",
+    });
+  });
+
+  it("asks for your OK when a follow-up waits as a draft", () => {
+    expect(
+      notificationFor({
+        type: "posted",
+        job,
+        run,
+        review: { id: 1, url: "https://r", state: "PENDING" },
+        needsYou: "explained bug F2: accept the reason?",
+      }),
+    ).toMatchObject({
+      title: "Needs your OK · acme/api#128",
+      body: "explained bug F2: accept the reason? — Fix session refresh",
+    });
+  });
+
   it("links a failure to the PR", () => {
     expect(notificationFor({ type: "failed", job, step: "posting", error: "GitHub 502" })).toEqual({
       title: "Review failed · acme/api#128",

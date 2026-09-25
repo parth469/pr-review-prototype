@@ -32,6 +32,18 @@ describe("config", () => {
         keepWorktree: false,
       },
       publish: { mode: "submit", requireStillRequested: true },
+      followUp: {
+        enabled: true,
+        promptFile: "prompts/follow-up.md",
+        approve: "submit",
+        explainedBugNeedsYou: true,
+        explainedRiskNeedsYou: true,
+        requireGreenCi: true,
+        ciWaitMin: 60,
+        maxAutoRounds: 3,
+        freshReviewOverLines: 1000,
+        resolveThreads: true,
+      },
       statusPage: { enabled: true, port: 4777 },
       notify: { enabled: true, onPosted: true, onFailed: true },
     });
@@ -42,8 +54,10 @@ describe("config", () => {
     expect(config.review).toMatchObject({ effort: "max", model: "claude-opus-5-5" });
   });
 
-  it("matches the committed config.json", async () => {
-    expect(await loadConfig("config.json")).toEqual(parseConfig({}));
+  it("matches the committed config.json: defaults, limited to Axy-K-Git", async () => {
+    expect(await loadConfig("config.json")).toEqual(
+      parseConfig({ repos: { allow: ["Axy-Science/Axy-K-Git"], deny: [] } }),
+    );
   });
 
   it("rejects bad repo patterns and short intervals", () => {
