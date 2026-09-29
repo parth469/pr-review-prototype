@@ -4,9 +4,17 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import type { Config } from "../config.ts";
+import { z } from "zod";
+import { type Config, EFFORTS, MODELS } from "../config.ts";
 import type { Logger } from "../log.ts";
-import { isPostingPaused, type Runtime, setPostingPaused } from "../runtime.ts";
+import {
+  currentSessionUsage,
+  isPostingPaused,
+  type Runtime,
+  reviewSettings,
+  setPostingPaused,
+  setReviewChoice,
+} from "../runtime.ts";
 import type { Job, JobStatus, State } from "../state.ts";
 import { renderPage } from "./page.ts";
 
@@ -14,7 +22,7 @@ export interface StatusServerDeps {
   state: State;
   config: Config;
   runtime: Runtime;
-  worker: { kick(): void };
+  worker: { kick(): void; stop(jobId: number): boolean };
   log: Logger;
   /** Tests pass 0 for a free port. */
   port?: number;
@@ -60,6 +68,24 @@ function send(res: ServerResponse, status: number, body: string, type: string, e
 const sendJson = (res: ServerResponse, status: number, value: unknown) =>
   send(res, status, JSON.stringify(value), "application/json; charset=utf-8");
 
+const reviewChoiceSchema = z.strictObject({
+  model: z.enum(MODELS).optional(),
+  effort: z.enum(EFFORTS).optional(),
+});
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  let text = "";
+  for await (const chunk of req) {
+    text += chunk;
+    if (text.length > 4096) throw new HttpError(413, "Body too large");
+  }
+  try {
+    return JSON.parse(text || "{}");
+  } catch {
+    throw new HttpError(400, "Body is not JSON");
+  }
+}
+
 async function readSavedReview(job: Job): Promise<unknown> {
   if (!job.output_dir) return null;
   try {
@@ -101,6 +127,11 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
       case "review-now":
         after = state.resetJob(job.id, "queued", ["skipped"]);
         break;
+      case "stop":
+        // The worker skips the job once Claude has stopped, a moment later.
+        if (!worker.stop(job.id)) throw new HttpError(409, "That review is not running any more");
+        log.info({ job: job.id, repo: job.repo, pr: job.pr, action }, "status page action");
+        return job;
       default:
         throw new HttpError(404, `Unknown action ${action}`);
     }
@@ -129,6 +160,14 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         if (!paused) worker.kick();
         return sendJson(res, 200, { postingPaused: paused });
       }
+      if (path === "/api/review-settings") {
+        const parsed = reviewChoiceSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
+        setReviewChoice(state, parsed.data);
+        const { model, effort } = reviewSettings(state, config);
+        log.info({ model, effort }, "review settings changed");
+        return sendJson(res, 200, { model, effort });
+      }
       throw new HttpError(404, "Not found");
     }
     if (req.method !== "GET") throw new HttpError(405, "Method not allowed");
@@ -143,6 +182,7 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
       });
     }
     if (path === "/api/status") {
+      const { model, effort } = reviewSettings(state, config);
       const counts = Object.fromEntries(
         STATUSES.map((s) => [s, state.listByStatus(s).length]).filter(([, n]) => n),
       );
@@ -152,7 +192,12 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         postingPaused: isPostingPaused(state),
         pollIntervalSec: config.pollIntervalSec,
         publishMode: config.publish.mode,
-        model: config.review.model,
+        model,
+        effort,
+        models: MODELS,
+        efforts: EFFORTS,
+        sessionUsage: currentSessionUsage(state) ?? null,
+        maxSessionUsagePct: config.review.maxSessionUsagePct,
         counts,
       });
     }

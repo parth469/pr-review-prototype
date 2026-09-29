@@ -72,8 +72,9 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `reviewsDir` | `reviews` | Saved review output |
 | `logLevel` | `info` | `debug` also shows PRs already seen |
 | `review.enabled` | `true` | Turn the review worker off to only detect |
-| `review.model` | `claude-opus-5-5` | Claude model |
-| `review.effort` | `high` | `low`, `medium`, `high`, `xhigh` or `max` |
+| `review.model` | `claude-opus-5-5` | `claude-opus-5-5` or `claude-sonnet-5-5`. Default only: a pick on the status page wins |
+| `review.effort` | `high` | `low`, `medium` or `high`. Default only, like `model` |
+| `review.maxSessionUsagePct` | `90` | Reviews wait in the queue while the 5-hour session usage is at or above this percent, until the window resets. `null` = never |
 | `review.skill` | `caveman:caveman-review` | Skill named on the first line of the prompt |
 | `review.promptFile` | `prompts/review.md` | Prompt template (`{{skill}}`, `{{repo}}`, `{{number}}`, `{{sha}}`, `{{baseRef}}`) |
 | `review.pluginPath` | `null` | Plugin folder; `null` finds the installed `caveman@caveman` |

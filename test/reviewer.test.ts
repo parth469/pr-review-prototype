@@ -11,6 +11,7 @@ import {
   reviewJsonSchema,
   reviewSchema,
   sanitizedEnv,
+  sessionUsageFrom,
 } from "../src/reviewer.ts";
 import { defaultConfig } from "./helpers.ts";
 
@@ -122,6 +123,41 @@ describe("createReviewer", () => {
       fakeQuery([init(["caveman:caveman-review"]), success({ summary: "x" })]),
     );
     await expect(run(input())).rejects.toThrow(/wrong shape/);
+  });
+});
+
+describe("session usage", () => {
+  // Shape copied from a real transcript.
+  const event = {
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "allowed",
+      resetsAt: 1790671200,
+      rateLimitType: "five_hour",
+      unifiedWindows: {
+        five_hour: { utilization: 0.43, resetsAt: 1790671200 },
+        seven_day: { utilization: 0.59, resetsAt: 1790352000 },
+      },
+    },
+  };
+
+  it("reads the 5-hour window as a percent", () => {
+    expect(sessionUsageFrom(event.rate_limit_info as never)).toEqual({
+      utilization: 43,
+      resetsAt: new Date(1790671200 * 1000),
+    });
+    expect(
+      sessionUsageFrom({ status: "rejected", rateLimitType: "five_hour", resetsAt: 1790671200 }),
+    ).toMatchObject({ utilization: 100 });
+    expect(sessionUsageFrom({ status: "allowed", rateLimitType: "seven_day" })).toBeUndefined();
+  });
+
+  it("reports it during a run", async () => {
+    const seen: number[] = [];
+    await createReviewer(
+      fakeQuery([init(["caveman:caveman-review"]), event, success(sampleReview)]),
+    )({ ...input(), onUsage: (u) => seen.push(u.utilization) });
+    expect(seen).toEqual([43]);
   });
 });
 

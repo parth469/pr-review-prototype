@@ -2,10 +2,16 @@ import { createWriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  type Options,
+  query,
+  type SDKMessage,
+  type SDKRateLimitInfo,
+} from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Config } from "./config.ts";
 import type { FollowUpResult, LedgerEntry } from "./followup.ts";
+import type { SessionUsage } from "./runtime.ts";
 
 export const findingSchema = z.object({
   path: z.string().min(1).describe("File path relative to the repository root"),
@@ -132,10 +138,32 @@ export interface RunReviewInput {
   pluginPath: string;
   transcriptPath: string;
   signal?: AbortSignal;
+  /** Plan usage of the 5-hour session, each time Claude reports it during the run. */
+  onUsage?: (usage: SessionUsage) => void;
 }
 
 export type RunReview = (input: RunReviewInput) => Promise<ReviewRun>;
 export type RunFollowUp = (input: RunReviewInput) => Promise<FollowUpRun>;
+
+/**
+ * The 5-hour session usage in a rate_limit_event. `unifiedWindows` is not in the SDK types yet,
+ * but every event carries it; utilization there is 0-1.
+ */
+export function sessionUsageFrom(info: SDKRateLimitInfo): SessionUsage | undefined {
+  const windows = (info as { unifiedWindows?: Record<string, unknown> }).unifiedWindows;
+  const window = windows?.five_hour as { utilization?: number; resetsAt?: number } | undefined;
+  const fiveHour = info.rateLimitType === "five_hour";
+  const fraction =
+    window?.utilization ??
+    (fiveHour ? info.utilization : undefined) ??
+    (fiveHour && info.status === "rejected" ? 1 : undefined);
+  if (fraction == null) return undefined;
+  const resetsAt = window?.resetsAt ?? (fiveHour ? info.resetsAt : undefined);
+  return {
+    utilization: Math.round(fraction * 1000) / 10,
+    resetsAt: resetsAt ? new Date(resetsAt * 1000) : null,
+  };
+}
 
 export function buildOptions(
   input: RunReviewInput,
@@ -200,6 +228,9 @@ function createRunner<T>(
           }
         } else if (message.type === "result") {
           result = message;
+        } else if (message.type === "rate_limit_event" && input.onUsage) {
+          const usage = sessionUsageFrom(message.rate_limit_info);
+          if (usage) input.onUsage(usage);
         }
       }
     } catch (err) {

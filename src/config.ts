@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
+/** The models and effort levels you can pick on the status page. */
+export const MODELS = ["claude-opus-5-5", "claude-sonnet-5-5"] as const;
+export const EFFORTS = ["low", "medium", "high"] as const;
+export type Model = (typeof MODELS)[number];
+export type Effort = (typeof EFFORTS)[number];
+
 const repoPattern = z
   .string()
   .regex(/^(\*|[\w.-]+\/(\*|[\w.-]+))$/, 'Use "*", "owner/*" or "owner/name"');
@@ -27,8 +33,11 @@ export const configSchema = z.object({
   review: z
     .object({
       enabled: z.boolean().default(true),
-      model: z.string().min(1).default("claude-opus-5-5"),
-      effort: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
+      // Defaults only: a choice made on the status page wins until you change it there.
+      model: z.enum(MODELS).default("claude-opus-5-5"),
+      effort: z.enum(EFFORTS).default("high"),
+      // Hold reviews while the 5-hour session usage is at or above this percent. null = never.
+      maxSessionUsagePct: z.number().min(1).max(100).nullable().default(90),
       skill: z.string().min(1).default("caveman:caveman-review"),
       promptFile: z.string().min(1).default("prompts/review.md"),
       // Plugin that provides the skill. null = look up the installed "caveman@caveman" plugin.

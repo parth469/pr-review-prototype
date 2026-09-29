@@ -14,7 +14,12 @@ import { silentLog } from "./helpers.ts";
 function call(
   port: number,
   path: string,
-  { method = "GET", token, host }: { method?: string; token?: string; host?: string } = {},
+  {
+    method = "GET",
+    token,
+    host,
+    body,
+  }: { method?: string; token?: string; host?: string; body?: string } = {},
 ): Promise<{ status: number; body: string; headers: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -37,7 +42,7 @@ function call(
       },
     );
     req.on("error", reject);
-    req.end();
+    req.end(body);
   });
 }
 
@@ -45,6 +50,7 @@ describe("status server", () => {
   let state: State;
   let server: StatusServer;
   let kicks: number;
+  let running: Set<number>;
   let dir: string;
 
   const seed = (pr: number) =>
@@ -61,11 +67,12 @@ describe("status server", () => {
     state = openState(":memory:");
     dir = mkdtempSync(join(tmpdir(), "proxy-web-"));
     kicks = 0;
+    running = new Set();
     const started = await startStatusServer({
       state,
       config: parseConfig({}),
       runtime: createRuntime("me"),
-      worker: { kick: () => void kicks++ },
+      worker: { kick: () => void kicks++, stop: (id) => running.delete(id) },
       log: silentLog,
       port: 0,
     });
@@ -176,6 +183,46 @@ describe("status server", () => {
     expect((await post("explode")).status).toBe(404);
   });
 
+  it("stops a running review, and says so when it is not running", async () => {
+    seed(1);
+    const job = state.claimNext();
+    if (!job) throw new Error("no job");
+    running.add(job.id);
+    const stop = () =>
+      call(server.port, `/api/jobs/${job.id}/stop`, { method: "POST", token: server.token });
+    expect((await stop()).status).toBe(200);
+    expect(running.has(job.id)).toBe(false);
+    expect((await stop()).status).toBe(409);
+  });
+
+  it("picks the model and effort for the next review, and refuses anything else", async () => {
+    const set = (body: unknown) =>
+      call(server.port, "/api/review-settings", {
+        method: "POST",
+        token: server.token,
+        body: JSON.stringify(body),
+      });
+    const status = async () => JSON.parse((await call(server.port, "/api/status")).body);
+    expect(await status()).toMatchObject({
+      model: "claude-opus-5-5",
+      effort: "high",
+      models: ["claude-opus-5-5", "claude-sonnet-5-5"],
+      efforts: ["low", "medium", "high"],
+      sessionUsage: null,
+    });
+
+    expect(JSON.parse((await set({ model: "claude-sonnet-5-5" })).body)).toEqual({
+      model: "claude-sonnet-5-5",
+      effort: "high",
+    });
+    await set({ effort: "low" });
+    expect(await status()).toMatchObject({ model: "claude-sonnet-5-5", effort: "low" });
+
+    expect((await set({ effort: "max" })).status).toBe(400);
+    expect((await set({ model: "gpt-5" })).status).toBe(400);
+    expect(await status()).toMatchObject({ model: "claude-sonnet-5-5", effort: "low" });
+  });
+
   it("gives up quietly when the port is taken", async () => {
     const blocker = createServer();
     await new Promise<void>((r) => blocker.listen(0, "127.0.0.1", () => r()));
@@ -184,7 +231,7 @@ describe("status server", () => {
       state,
       config: parseConfig({}),
       runtime: createRuntime("me"),
-      worker: { kick: () => undefined },
+      worker: { kick: () => undefined, stop: () => false },
       log: silentLog,
       port,
     });

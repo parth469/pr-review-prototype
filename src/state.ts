@@ -120,6 +120,9 @@ function migrate(db: DatabaseSync): void {
   }
 }
 
+/** Skip reason for a review stopped from the status page. */
+export const STOPPED_REASON = "stopped by you";
+
 export interface State {
   recordSeen(input: SeenInput): SeenResult;
   /** Queue a PR commit by hand, ignoring skip rules. Resets a finished or failed job. */
@@ -335,7 +338,8 @@ export function openState(path: string): State {
         insertLinked({ repo, pr, headSha, title, url, status, reason, now });
         return "new";
       }
-      if (existing.status !== "skipped") return "known";
+      // A review you stopped stays stopped until you start it again.
+      if (existing.status !== "skipped" || existing.reason === STOPPED_REASON) return "known";
 
       // Only skipped jobs are re-evaluated: a draft can become ready, config can change.
       if (status === "queued") {

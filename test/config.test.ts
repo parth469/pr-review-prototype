@@ -23,6 +23,7 @@ describe("config", () => {
         enabled: true,
         model: "claude-opus-5-5",
         effort: "high",
+        maxSessionUsagePct: 90,
         skill: "caveman:caveman-review",
         promptFile: "prompts/review.md",
         pluginPath: null,
@@ -50,8 +51,13 @@ describe("config", () => {
   });
 
   it("keeps review defaults when only some review fields are set", () => {
-    const config = parseConfig({ review: { effort: "max" } });
-    expect(config.review).toMatchObject({ effort: "max", model: "claude-opus-5-5" });
+    const config = parseConfig({ review: { effort: "low" } });
+    expect(config.review).toMatchObject({ effort: "low", model: "claude-opus-5-5" });
+  });
+
+  it("rejects a model or effort the status page does not offer", () => {
+    expect(() => parseConfig({ review: { model: "claude-haiku-4-5" } })).toThrow(/model/);
+    expect(() => parseConfig({ review: { effort: "max" } })).toThrow(/effort/);
   });
 
   it("matches the committed config.json: defaults, limited to Axy-K-Git", async () => {

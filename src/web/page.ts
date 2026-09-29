@@ -37,9 +37,14 @@ a { color: var(--accent); }
 button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
   border-radius: 6px; padding: 4px 10px; }
 button:hover { border-color: var(--accent); }
-button:disabled { opacity: .5; cursor: progress; }
+button:disabled, select:disabled { opacity: .5; cursor: progress; }
+select { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 4px 6px; }
+select:hover { border-color: var(--accent); }
+.picks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.picks label { display: flex; align-items: center; gap: 6px; }
+button.danger { color: var(--change); border-color: var(--change); }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-button:focus-visible, a:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, select:focus-visible, a:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wrap { max-width: 1280px; margin: 0 auto; }
 header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 20px 0 14px; border-bottom: 1px solid var(--line); }
 h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; }
@@ -95,9 +100,14 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--sunken); b
   <header>
     <h1>Proxy Reviewer</h1>
     <div class="facts" id="facts"><span>Connecting…</span></div>
+    <div class="picks" id="picks" hidden>
+      <label title="Model for the next review. A review already running keeps its model.">Model <select id="model"></select></label>
+      <label title="Effort for the next review.">Effort <select id="effort"></select></label>
+    </div>
     <button id="pause" type="button" hidden></button>
   </header>
   <div id="banner" class="banner" hidden>Posting is paused. Reviews still run and wait here until you resume.</div>
+  <div id="usageBanner" class="banner" hidden></div>
   <div class="counts" id="counts"></div>
   <div class="layout">
     <section class="card" aria-label="Pull requests">
@@ -143,8 +153,10 @@ function toast(msg) {
   t.textContent = msg; t.hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(function () { t.hidden = true; }, 3500);
 }
-function api(path, post) {
-  return fetch(path, post ? { method: "POST", headers: { "X-Proxy-Token": TOKEN } } : {}).then(function (r) {
+function api(path, post, body) {
+  var init = post ? { method: "POST", headers: { "X-Proxy-Token": TOKEN } } : {};
+  if (body) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
+  return fetch(path, init).then(function (r) {
     return r.json().then(function (body) { if (!r.ok) throw new Error(body.error || r.statusText); return body; });
   });
 }
@@ -166,16 +178,19 @@ function describe(job) {
     if (job.reason === "waiting for CI") return ["Waiting for CI", "work", "Next check " + time(job.next_attempt_at)];
     return ["Posting soon", "work"];
   }
+  if (s === "queued" && job.next_attempt_at && /^session usage /.test(job.reason || "")) return ["Usage limit", "pending", job.reason + " · reviews at " + time(job.next_attempt_at)];
   if (s === "queued") return job.next_attempt_at ? ["Retry at " + time(job.next_attempt_at), "work", job.error] : ["Queued", "quiet"];
   if (s === "preparing") return ["Checking out…", "work"];
   if (s === "reviewing") return ["Claude reviewing…", "work"];
   if (s === "posting") return ["Posting…", "work"];
   if (s === "failed") return ["Failed", "change", job.error];
+  if (s === "skipped" && job.reason === "stopped by you") return ["Stopped", "quiet", "Review now starts it again"];
   if (s === "skipped") return ["Skipped", "quiet", job.reason];
   return [s, "quiet"];
 }
 function actionsFor(job) {
   var a = [];
+  if (job.status === "preparing" || job.status === "reviewing") a.push(["stop", "Stop", "Stop this review now. Nothing is posted; Review now starts it again."]);
   if (job.status === "failed") a.push(["retry", "Retry", "Try again. A saved review is only posted, not re-run."]);
   if (job.status === "skipped") a.push(["review-now", "Review now", "Review it anyway, ignoring the skip rule."]);
   if (["done", "reviewed", "failed"].indexOf(job.status) >= 0)
@@ -183,9 +198,10 @@ function actionsFor(job) {
   return a;
 }
 function actionButton(job, action) {
-  var b = el("button", { type: "button", text: action[1], title: action[2] });
+  var b = el("button", { type: "button", text: action[1], title: action[2], class: action[0] === "stop" ? "danger" : "" });
   b.addEventListener("click", function (e) {
     e.stopPropagation();
+    if (action[0] === "stop" && !confirm("Stop the review of " + job.repo + "#" + job.pr + "? Nothing is posted.")) return;
     b.disabled = true;
     api("/api/jobs/" + job.id + "/" + action[0], true)
       .then(function () { toast(action[1] + ": " + job.repo + "#" + job.pr); refresh(); })
@@ -199,12 +215,17 @@ function renderStatus(st) {
   paused = st.postingPaused;
   var facts = document.getElementById("facts");
   var ok = !st.lastPollError;
-  facts.replaceChildren(
+  facts.replaceChildren.apply(facts, [
     el("span", {}, [el("span", { class: "dot" + (ok ? "" : " off") }), document.createTextNode(ok ? "Running as " + st.viewer : "Poll failing: " + st.lastPollError)]),
     el("span", { text: "Last poll " + time(st.lastPollAt) + " · every " + st.pollIntervalSec + " s" }),
     el("span", { text: "Posting: " + (paused ? "paused" : st.publishMode === "submit" ? "on" : st.publishMode) }),
-    el("span", { text: st.model })
-  );
+    st.sessionUsage ? el("span", { text: "Session " + st.sessionUsage.utilization + "%" + (st.sessionUsage.resetsAt ? " · resets " + time(st.sessionUsage.resetsAt) : "") }) : null
+  ].filter(Boolean));
+  renderPicks(st);
+  var over = st.sessionUsage && st.maxSessionUsagePct != null && st.sessionUsage.utilization >= st.maxSessionUsagePct;
+  var ub = document.getElementById("usageBanner");
+  ub.hidden = !over;
+  if (over) ub.textContent = "Session usage is " + st.sessionUsage.utilization + "% (limit " + st.maxSessionUsagePct + "%). New reviews wait" + (st.sessionUsage.resetsAt ? " until " + time(st.sessionUsage.resetsAt) : "") + ".";
   var btn = document.getElementById("pause");
   btn.hidden = false;
   btn.textContent = paused ? "Resume posting" : "Pause posting";
@@ -216,6 +237,32 @@ function renderStatus(st) {
     Object.keys(st.counts).map(function (k) { return el("span", { class: "chip quiet", text: st.counts[k] + " " + (labels[k] || k) }); })
   );
 }
+
+var LABELS = { "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5", low: "Low", medium: "Medium", high: "High" };
+function fillSelect(id, options, value) {
+  var sel = document.getElementById(id);
+  if (sel.options.length !== options.length) {
+    sel.replaceChildren.apply(sel, options.map(function (o) { return el("option", { value: o, text: LABELS[o] || o }); }));
+  }
+  // Leave it alone while you are choosing.
+  if (document.activeElement !== sel && !sel.disabled) sel.value = value;
+}
+function renderPicks(st) {
+  document.getElementById("picks").hidden = false;
+  fillSelect("model", st.models, st.model);
+  fillSelect("effort", st.efforts, st.effort);
+}
+["model", "effort"].forEach(function (id) {
+  var sel = document.getElementById(id);
+  sel.addEventListener("change", function () {
+    var body = {}; body[id] = sel.value;
+    sel.disabled = true;
+    api("/api/review-settings", true, body)
+      .then(function (r) { toast("Next review: " + (LABELS[r.model] || r.model) + " · " + (LABELS[r.effort] || r.effort) + " effort"); })
+      .catch(function (err) { toast(err.message); })
+      .finally(function () { sel.disabled = false; sel.blur(); refresh(); });
+  });
+});
 
 function renderJobs(jobs) {
   document.getElementById("noJobs").hidden = jobs.length > 0;

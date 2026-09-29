@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.ts";
 import type { Publisher, PublishResult } from "../src/publisher.ts";
-import type { RunReview } from "../src/reviewer.ts";
-import { openState, type State } from "../src/state.ts";
+import type { RunReview, RunReviewInput } from "../src/reviewer.ts";
+import { currentSessionUsage, recordSessionUsage, setReviewChoice } from "../src/runtime.ts";
+import { openState, STOPPED_REASON, type State } from "../src/state.ts";
 import { createWorker, type WorkerEvent } from "../src/worker.ts";
 import { HeadMovedError, type Workspace } from "../src/workspace.ts";
 import { makePr, silentLog } from "./helpers.ts";
@@ -258,6 +259,85 @@ describe("worker", () => {
       throw new Error("aborted");
     }).processOne(controller.signal);
     expect(job).toMatchObject({ status: "queued", attempts: 0 });
+  });
+
+  it("stops a running review when asked: skipped, nothing posted, not requeued by the poller", async () => {
+    const publisher = fakePublisher([posted]);
+    let worker: ReturnType<typeof make> | undefined;
+    worker = make(
+      fakeWorkspace(root),
+      async (input) => {
+        expect(worker?.stop(1)).toBe(true);
+        input.signal?.throwIfAborted();
+        throw new Error("not stopped");
+      },
+      publisher,
+    );
+    const job = await worker.processOne();
+    expect(job).toMatchObject({ status: "skipped", reason: STOPPED_REASON, attempts: 0 });
+    expect(publisher.calls).toBe(0);
+    expect(worker.stop(1)).toBe(false); // nothing running any more
+
+    state.recordSeen({
+      repo: pr.repo,
+      pr: pr.number,
+      headSha: pr.headSha,
+      title: pr.title,
+      url: pr.url,
+      decision: { action: "queue" },
+    });
+    expect(state.get(1)).toMatchObject({ status: "skipped", reason: STOPPED_REASON });
+  });
+
+  it("reviews with the model and effort picked on the status page", async () => {
+    const seen: RunReviewInput[] = [];
+    const review = countingReview();
+    setReviewChoice(state, { model: "claude-sonnet-5-5", effort: "low" });
+    await make(fakeWorkspace(root), async (input) => {
+      seen.push(input);
+      return review(input);
+    }).processOne();
+    expect(seen[0]?.settings).toMatchObject({ model: "claude-sonnet-5-5", effort: "low" });
+  });
+
+  it("holds reviews while the session usage is at the limit, until the window resets", async () => {
+    const review = countingReview();
+    const resetsAt = new Date(Date.now() + 3_600_000);
+    recordSessionUsage(state, { utilization: 92, resetsAt });
+    const worker = make(fakeWorkspace(root), review);
+
+    const job = await worker.processOne();
+    expect(job).toMatchObject({
+      status: "queued",
+      attempts: 0,
+      reason: "session usage 92% (limit 90%)",
+    });
+    expect(job?.next_attempt_at).toBe(resetsAt.toISOString());
+    expect(review.calls).toBe(0);
+
+    // A by-hand review runs anyway.
+    expect(await worker.processOne(undefined, 1, { force: true })).toMatchObject({
+      status: "done",
+    });
+    expect(review.calls).toBe(1);
+  });
+
+  it("reviews under the limit, or once the usage window has reset", async () => {
+    recordSessionUsage(state, { utilization: 95, resetsAt: new Date(Date.now() - 1000) });
+    expect(currentSessionUsage(state)).toBeUndefined();
+    const review = countingReview();
+    expect(await make(fakeWorkspace(root), review).processOne()).toMatchObject({ status: "done" });
+    expect(review.calls).toBe(1);
+  });
+
+  it("saves the session usage Claude reports during a run", async () => {
+    const review = countingReview();
+    const resetsAt = new Date(Date.now() + 60_000);
+    await make(fakeWorkspace(root), async (input) => {
+      input.onUsage?.({ utilization: 41.5, resetsAt });
+      return review(input);
+    }).processOne();
+    expect(currentSessionUsage(state)).toEqual({ utilization: 41.5, resetsAt });
   });
 
   it("returns undefined when nothing is ready", async () => {

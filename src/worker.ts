@@ -19,7 +19,13 @@ import {
 } from "./publisher.ts";
 import { numberFindings, renderReviewMarkdown } from "./report.ts";
 import type { ReviewRun, RunFollowUp, RunReview } from "./reviewer.ts";
-import type { Job, State } from "./state.ts";
+import {
+  currentSessionUsage,
+  recordSessionUsage,
+  reviewSettings,
+  type SessionUsage,
+} from "./runtime.ts";
+import { type Job, STOPPED_REASON, type State } from "./state.ts";
 import type { FollowUpSource, PostedReview } from "./types.ts";
 import { HeadMovedError, type PreparedWorkspace, type Workspace } from "./workspace.ts";
 
@@ -80,7 +86,13 @@ export interface Worker {
   /** Keep processing until the signal aborts. Wakes on kick() or every idleMs. */
   start(signal: AbortSignal, idleMs?: number): Promise<void>;
   kick(): void;
+  /** Stop the review running for this job; it ends as skipped. False if it is not running. */
+  stop(jobId: number): boolean;
 }
+
+/** Without a known reset time, look at the session usage again after this long. */
+export const USAGE_RECHECK_MS = 30 * 60_000;
+export const USAGE_REASON_PREFIX = "session usage";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 type Fields = Record<string, unknown>;
@@ -88,6 +100,8 @@ type Fields = Record<string, unknown>;
 export function createWorker(deps: WorkerDeps): Worker {
   const { state, workspace, runReview, publisher, config, log } = deps;
   let wake: (() => void) | undefined;
+  /** Reviews in progress, so the status page can stop one. */
+  const running = new Map<number, AbortController>();
 
   /**
    * For a PR you reviewed before: gather the earlier findings, replies and changes since.
@@ -145,10 +159,16 @@ export function createWorker(deps: WorkerDeps): Worker {
   ): Promise<{ run: ReviewRun; outDir: string } | undefined> {
     // An earlier commit may have been posted since this one was queued.
     const job = state.linkParent(queued.id) ?? queued;
+    // Read now: a model or effort picked on the status page applies from the next review on.
+    const settings = reviewSettings(state, config);
     log.info({ ...fields, round: job.round, attempt: job.attempts + 1 }, "preparing");
     let prepared: PreparedWorkspace | undefined;
+    const stopper = new AbortController();
+    running.set(job.id, stopper);
+    const jobSignal = signal ? AbortSignal.any([signal, stopper.signal]) : stopper.signal;
     try {
       prepared = await workspace.prepare(job);
+      stopper.signal.throwIfAborted();
       state.setStatus(job.id, "reviewing");
       const { context, carried = [], nextId = 1 } = await planFollowUp(job, prepared, fields);
 
@@ -187,18 +207,19 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...fields,
           round: job.round,
           followUp: Boolean(context),
-          model: config.review.model,
-          effort: config.review.effort,
+          model: settings.model,
+          effort: settings.effort,
         },
         "reviewing",
       );
       const input = {
         cwd: prepared.dir,
         prompt,
-        settings: config.review,
+        settings,
         pluginPath: await deps.pluginPath(),
         transcriptPath: join(outDir, "transcript.jsonl"),
-        ...(signal ? { signal } : {}),
+        signal: jobSignal,
+        onUsage: (usage: SessionUsage) => recordSessionUsage(state, usage),
       };
       let run: ReviewRun;
       if (context && deps.followUp) {
@@ -213,6 +234,8 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...(carried.length > 0 ? { carried } : {}),
         };
       }
+      // Stopped just as Claude finished: still nothing gets posted.
+      stopper.signal.throwIfAborted();
 
       await Promise.all([
         writeFile(join(outDir, "result.json"), json(run)),
@@ -248,7 +271,10 @@ export function createWorker(deps: WorkerDeps): Worker {
       );
       return { run, outDir };
     } catch (err) {
-      if (err instanceof HeadMovedError) {
+      if (stopper.signal.aborted) {
+        state.skip(job.id, STOPPED_REASON);
+        log.info(fields, "review stopped from the status page");
+      } else if (err instanceof HeadMovedError) {
         state.skip(job.id, "superseded");
         log.info({ ...fields, reason: err.message }, "skipped");
       } else if (signal?.aborted) {
@@ -261,6 +287,7 @@ export function createWorker(deps: WorkerDeps): Worker {
       }
       return undefined;
     } finally {
+      running.delete(job.id);
       if (prepared && !config.review.keepWorktree) {
         await workspace
           .cleanup(prepared)
@@ -359,6 +386,24 @@ export function createWorker(deps: WorkerDeps): Worker {
     return true;
   }
 
+  /**
+   * True if the 5-hour session is used up to the limit; the job then waits in the queue
+   * until the window resets instead of starting a review.
+   */
+  function overUsageLimit(job: Job, fields: Fields): boolean {
+    const limit = config.review.maxSessionUsagePct;
+    const usage = limit === null ? undefined : currentSessionUsage(state);
+    if (limit === null || !usage || usage.utilization < limit) return false;
+    const retryAt = usage.resetsAt ?? new Date(Date.now() + USAGE_RECHECK_MS);
+    const reason = `${USAGE_REASON_PREFIX} ${usage.utilization}% (limit ${limit}%)`;
+    state.defer(job.id, retryAt, reason, undefined, { status: "queued", ci: false });
+    log.info(
+      { ...fields, usage: usage.utilization, limit, retryAt },
+      "session usage high, review after the reset",
+    );
+    return true;
+  }
+
   function logFailure(after: Job, err: unknown, fields: Fields, step: "review" | "posting"): void {
     if (after.status === "failed") {
       log.error({ ...fields, err, attempts: after.attempts }, `${step} failed, giving up`);
@@ -403,6 +448,8 @@ export function createWorker(deps: WorkerDeps): Worker {
       return state.get(job.id);
     }
 
+    // A review you start by hand (--review) runs whatever the usage.
+    if (!options.force && overUsageLimit(job, fields)) return state.get(job.id);
     if (await blockedByPending(job, fields)) return state.get(job.id);
     const reviewed = await review(job, fields, signal);
     if (reviewed && paused()) {
@@ -445,6 +492,13 @@ export function createWorker(deps: WorkerDeps): Worker {
 
     kick() {
       wake?.();
+    },
+
+    stop(jobId) {
+      const stopper = running.get(jobId);
+      if (!stopper) return false;
+      stopper.abort(new Error("Review stopped from the status page"));
+      return true;
     },
   };
 }
