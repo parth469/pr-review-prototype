@@ -11,7 +11,14 @@ import {
 } from "./diff.ts";
 import type { Logger } from "./log.ts";
 import { nextFindingNumber, numberFindings } from "./report.ts";
-import type { Finding, FollowUpOutput, Review, ReviewRun, Verdict } from "./reviewer.ts";
+import {
+  type Finding,
+  type FollowUpOutput,
+  mustFix,
+  type Review,
+  type ReviewRun,
+  type Verdict,
+} from "./reviewer.ts";
 import type { Job } from "./state.ts";
 import type { FollowUpSource, PostedReview, ReviewThread, ThreadRef } from "./types.ts";
 
@@ -103,7 +110,6 @@ export function stripMarkers(body: string): string {
   return body.replace(ANY_MARKER, "").trim();
 }
 
-const blocking = (s: Finding["severity"]) => s === "bug" || s === "risk";
 const normPath = (path: string) => path.replace(/^\.?\//, "");
 const byId = (a: { id: string }, b: { id: string }) =>
   Number(a.id.slice(1)) - Number(b.id.slice(1));
@@ -160,9 +166,8 @@ export function needsCheck(
   if (entry.status === "explained") {
     return explanationNeedsYou(entry.severity, settings) && !entry.accepted;
   }
-  return (
-    blocking(entry.severity) && (entry.status === "not_fixed" || entry.status === "partly_fixed")
-  );
+  // A minor risk, nit or question left open is settled: it never comes back as a blocker.
+  return mustFix(entry) && (entry.status === "not_fixed" || entry.status === "partly_fixed");
 }
 
 /**
@@ -272,7 +277,7 @@ export async function prepareFollowUp(
     return {
       kind: "fresh",
       reason: `${sinceLastLines} lines changed since the last review (over ${settings.freshReviewOverLines})`,
-      carried: ledger.filter((e) => check(e) && blocking(e.severity)),
+      carried: ledger.filter((e) => check(e) && mustFix(e)),
       nextId: nextFindingNumber(ledger.map((e) => e.id)),
     };
   }
@@ -308,6 +313,7 @@ export async function prepareFollowUp(
   const previousJson = toCheck.map((e) => ({
     id: e.id,
     severity: e.severity,
+    mustFix: mustFix(e),
     path: e.path,
     line: e.line,
     ...(e.endLine ? { endLine: e.endLine } : {}),
@@ -438,7 +444,7 @@ export function finalizeFollowUp(
       checked.verdict = "not_fixed";
       checked.status = "not_fixed";
       checked.overruled = `Claude said ${answer.verdict}, but ${overruled}`;
-    } else if (blocking(entry.severity) && DONE_CLAIMS.includes(answer.verdict)) {
+    } else if (mustFix(entry) && DONE_CLAIMS.includes(answer.verdict)) {
       // Verdicts that hold up, but that plain code cannot confirm well enough to approve alone.
       if (!ctx.linear) {
         const what = answer.verdict.replace(/_/g, " ");
@@ -483,8 +489,7 @@ export function finalizeFollowUp(
   ].sort(byId);
 
   const stillOpen =
-    previous.some((p) => blocking(p.severity) && STILL_OPEN.includes(p.verdict)) ||
-    findings.some((f) => blocking(f.severity));
+    previous.some((p) => mustFix(p) && STILL_OPEN.includes(p.verdict)) || findings.some(mustFix);
 
   return {
     review: {

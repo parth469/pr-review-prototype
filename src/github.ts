@@ -3,7 +3,6 @@ import { promisify } from "node:util";
 import { Octokit } from "octokit";
 import type { Logger } from "./log.ts";
 import type {
-  CiState,
   FollowUpSource,
   GitHubClient,
   PullRequest,
@@ -108,30 +107,6 @@ interface ThreadsPage {
       };
     } | null;
   } | null;
-}
-
-// Check run conclusions that mean CI is red. neutral, skipped and stale do not.
-const FAILED_CONCLUSIONS = new Set([
-  "failure",
-  "timed_out",
-  "cancelled",
-  "action_required",
-  "startup_failure",
-]);
-
-/** One state for all the checks and statuses of a commit. Any failure wins, then pending. */
-export function combineCi(
-  runs: Array<{ status: string; conclusion: string | null }>,
-  statuses: Array<{ state: string }>,
-): CiState {
-  if (runs.length === 0 && statuses.length === 0) return "none";
-  const failed =
-    runs.some((r) => r.status === "completed" && FAILED_CONCLUSIONS.has(r.conclusion ?? "")) ||
-    statuses.some((s) => s.state === "failure" || s.state === "error");
-  if (failed) return "failure";
-  const pending =
-    runs.some((r) => r.status !== "completed") || statuses.some((s) => s.state === "pending");
-  return pending ? "pending" : "success";
 }
 
 export function createGitHub(token: string, log: Logger): GitHub {
@@ -335,18 +310,6 @@ export function createGitHub(token: string, log: Logger): GitHub {
         if ((err as { status?: number }).status === 404) return undefined;
         throw err;
       }
-    },
-
-    async getCiState(repo, sha) {
-      const ref = { ...splitRepo(repo), ref: sha };
-      const [runs, status] = await Promise.all([
-        octokit.paginate("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
-          ...ref,
-          per_page: 100,
-        }),
-        octokit.request("GET /repos/{owner}/{repo}/commits/{ref}/status", ref),
-      ]);
-      return combineCi(runs, status.data.statuses);
     },
 
     async getPullDiff(repo, number) {

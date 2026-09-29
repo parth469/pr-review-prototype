@@ -18,6 +18,11 @@ export const findingSchema = z.object({
   line: z.number().int().min(1).describe("Line number in the new version of the file"),
   endLine: z.number().int().min(1).optional().describe("Last line, for multi-line findings"),
   severity: z.enum(["bug", "risk", "nit", "question"]),
+  mustFix: z
+    .boolean()
+    .describe(
+      "true for every bug, and for a risk only when it is serious: security, data loss, a crash or broken behaviour in production. false for a minor risk, a nit or a question",
+    ),
   body: z.string().min(1).describe("The problem, why it matters, and the fix"),
 });
 
@@ -27,10 +32,19 @@ export const reviewSchema = z.object({
   findings: z.array(findingSchema),
 });
 
-export type Finding = z.infer<typeof findingSchema> & {
+// mustFix is optional here: reviews saved before the grade existed do not have it.
+export type Finding = Omit<z.infer<typeof findingSchema>, "mustFix"> & {
+  mustFix?: boolean;
   /** F1, F2... given after the run, stable across rounds so a follow-up can name each finding. */
   id?: string;
 };
+/**
+ * Whether a finding blocks approval from round two on. A bug always does; a risk only when
+ * graded serious. Findings saved before the grade existed count as minor unless a bug.
+ */
+export const mustFix = (f: Pick<Finding, "severity" | "mustFix">) =>
+  f.severity === "bug" || (f.severity === "risk" && f.mustFix === true);
+
 export type Review = Omit<z.infer<typeof reviewSchema>, "findings"> & { findings: Finding[] };
 
 export const VERDICTS = [

@@ -81,9 +81,6 @@ export interface Comparison {
   patch: string;
 }
 
-/** Combined result of check runs and commit statuses. "none" = no CI configured. */
-export type CiState = "success" | "failure" | "pending" | "none";
-
 /** GitHub reads the worker needs to prepare a follow-up review. */
 export interface FollowUpSource {
   listReviewThreads(repo: string, number: number): Promise<ReviewThread[]>;
@@ -102,7 +99,7 @@ export interface CreateReviewPayload {
   commit_id: string;
   body: string;
   /** Omitted: GitHub creates a pending review only the author can see. */
-  event?: "REQUEST_CHANGES" | "COMMENT";
+  event?: ReviewEventName;
   comments: Array<{
     path: string;
     line: number;
@@ -135,7 +132,6 @@ export interface ReviewTarget {
   /** Reply in a thread, as part of the given (pending) review. */
   replyInThread(reviewNodeId: string, threadId: string, body: string): Promise<void>;
   resolveThread(threadId: string): Promise<void>;
-  getCiState(repo: string, sha: string): Promise<CiState>;
 }
 
 export type ReviewEventName = "REQUEST_CHANGES" | "COMMENT" | "APPROVE";

@@ -113,24 +113,30 @@ describe("ledgerOf", () => {
     ]);
   });
 
-  it("rechecks open findings and blocking ones still open, not settled or skipped nits", () => {
-    const e = (severity: LedgerEntry["severity"], status: LedgerEntry["status"]) =>
-      ({ severity, status }) as LedgerEntry;
+  it("rechecks open findings and must-fix ones still open, not settled or minor ones", () => {
+    const e = (severity: LedgerEntry["severity"], status: LedgerEntry["status"], mustFix = true) =>
+      ({ severity, status, mustFix }) as LedgerEntry;
     const s = defaultConfig.followUp;
     expect(needsCheck(e("nit", "open"), s)).toBe(true);
     expect(needsCheck(e("bug", "partly_fixed"), s)).toBe(true);
     expect(needsCheck(e("risk", "not_fixed"), s)).toBe(true);
+    expect(needsCheck(e("risk", "not_fixed", false), s)).toBe(false);
     expect(needsCheck(e("bug", "fixed"), s)).toBe(false);
     expect(needsCheck(e("nit", "not_fixed"), s)).toBe(false);
   });
 
   it("rechecks an explanation that still needs your OK, until you accepted it", () => {
-    const s = defaultConfig.followUp;
+    const s = {
+      ...defaultConfig.followUp,
+      explainedBugNeedsYou: true,
+      explainedRiskNeedsYou: true,
+    };
     const explained = { severity: "bug", status: "explained" } as LedgerEntry;
     expect(needsCheck(explained, s)).toBe(true);
     expect(needsCheck({ ...explained, accepted: true }, s)).toBe(false);
     expect(needsCheck({ ...explained, severity: "risk" }, s)).toBe(true);
     expect(needsCheck(explained, { ...s, explainedBugNeedsYou: false })).toBe(false);
+    expect(needsCheck(explained, defaultConfig.followUp)).toBe(false);
     expect(needsCheck({ ...explained, severity: "nit" }, s)).toBe(false);
   });
 });
@@ -356,6 +362,7 @@ describe("prepareFollowUp", () => {
           ...prepareInput(checkout()),
           parent: { ...parent, review_id: 900 } as Job,
           parentRun: explainedRun,
+          settings: { ...defaultConfig.followUp, explainedBugNeedsYou: true },
           posted: { id: 900, url: "u", state: "PENDING", needsYou: "explained bug F1" },
         },
       );
@@ -581,16 +588,16 @@ describe("finalizeFollowUp", () => {
           verdict("F2", "fixed", [{ path: "src/a.ts", line: 2 }]),
         ],
         findings: [
-          { path: "src/a.ts", line: 2, severity: "risk", body: "New risk." },
-          { path: "src/a.ts", line: 10, severity: "bug", body: "Untouched code." },
-          { path: "src/a.ts", line: 3, severity: "bug", body: "Context line only." },
+          { path: "src/a.ts", line: 2, severity: "risk", mustFix: true, body: "New risk." },
+          { path: "src/a.ts", line: 10, severity: "bug", mustFix: true, body: "Untouched code." },
+          { path: "src/a.ts", line: 3, severity: "bug", mustFix: true, body: "Context line only." },
         ],
       },
       PR_DIFF,
       silentLog,
     );
     expect(review.findings).toEqual([
-      { id: "F3", path: "src/a.ts", line: 2, severity: "risk", body: "New risk." },
+      { id: "F3", path: "src/a.ts", line: 2, severity: "risk", mustFix: true, body: "New risk." },
     ]);
     expect(review.verdict).toBe("request_changes");
     expect(followUp.ledger.map((e) => [e.id, e.status, e.sha.slice(0, 1), e.round])).toEqual([

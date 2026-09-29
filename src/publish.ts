@@ -1,9 +1,9 @@
 import { type FollowUpResult, findingMarker, type LedgerEntry, replyMarker } from "./followup.ts";
 import { sortFindings } from "./report.ts";
-import type { Finding, Review, Verdict } from "./reviewer.ts";
+import { type Finding, mustFix, type Review, type Verdict } from "./reviewer.ts";
 import type { PullRequest, ReviewEventName } from "./types.ts";
 
-export type ReviewEvent = "REQUEST_CHANGES" | "COMMENT";
+export type ReviewEvent = "REQUEST_CHANGES" | "COMMENT" | "APPROVE";
 
 export interface InlineComment {
   path: string;
@@ -71,11 +71,11 @@ export function chooseEvent(
   viewer: string,
   carried: LedgerEntry[] = [],
 ): ReviewEvent {
-  // GitHub refuses REQUEST_CHANGES on your own PR.
+  // GitHub refuses REQUEST_CHANGES and APPROVE on your own PR.
   if (pr.author.toLowerCase() === viewer.toLowerCase()) return "COMMENT";
-  return review.findings.some(blocksEvent) || carried.some(blocksEvent)
-    ? "REQUEST_CHANGES"
-    : "COMMENT";
+  // Nits and questions never block: without a bug or risk, approve. Earlier findings carried
+  // into a full review follow the round-two rule: only must-fix ones block.
+  return review.findings.some(blocksEvent) || carried.some(mustFix) ? "REQUEST_CHANGES" : "APPROVE";
 }
 
 export interface BuildInput {
@@ -144,7 +144,9 @@ export function buildReview({
     parts.push("_To answer a point listed here, name its id (for example F2) in a PR comment._");
   }
   if (event === "COMMENT" && pr.author.toLowerCase() === viewer.toLowerCase()) {
-    parts.push("_Posted as a comment: GitHub does not allow requesting changes on your own PR._");
+    parts.push(
+      "_Posted as a comment: GitHub does not allow approving or requesting changes on your own PR._",
+    );
   }
   // The marker goes after trimming so a long review never loses it.
   const body = `${trim(parts.join("\n\n"))}\n\n${reviewMarker(pr.headSha)}`;
@@ -187,8 +189,6 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   not_fixed: "❌ not fixed",
 };
 const DONE: Verdict[] = ["fixed", "explained", "no_longer_applies"];
-const blocks = (s: Finding["severity"]) => s === "bug" || s === "risk";
-
 /** One table cell: the first sentence of a finding, on one line, without breaking the table. */
 function headline(text: string, max = 90): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -221,11 +221,13 @@ export function buildFollowUpReview(input: FollowUpBuildInput): FollowUpDraft {
   const replies: ThreadReply[] = [];
   const noThread: string[] = [];
   const rows: string[] = [];
+  let leftOpen = review.findings.length > 0;
   for (const p of followUp.previous) {
-    const optional = !blocks(p.severity) && !DONE.includes(p.verdict);
+    const optional = !mustFix(p) && !DONE.includes(p.verdict);
     rows.push(
-      `| ${p.id} | ${LABEL[p.severity]} \`${at(p)}\` ${headline(p.body)} | ${VERDICT_LABEL[p.verdict]}${optional ? " (optional)" : ""} |`,
+      `| ${p.id} | ${LABEL[p.severity]} \`${at(p)}\` ${headline(p.body)} | ${VERDICT_LABEL[p.verdict]}${optional ? " (non-blocking)" : ""} |`,
     );
+    if (!DONE.includes(p.verdict)) leftOpen = true;
     if (optional) continue;
     if (p.thread) {
       replies.push({
@@ -265,6 +267,9 @@ export function buildFollowUpReview(input: FollowUpBuildInput): FollowUpDraft {
     parts.push("_To answer a point listed here, name its id (for example F2) in a PR comment._");
   }
   if (input.note) parts.push(`_${input.note}_`);
+  if (input.event === "APPROVE" && leftOpen) {
+    parts.push("_Approving: what is left is non-blocking. Fix it here or in a later PR._");
+  }
 
   return {
     event: input.event,

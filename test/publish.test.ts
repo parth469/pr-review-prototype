@@ -19,11 +19,11 @@ const review = (findings: Finding[]): Review => ({
 const commentable = new Map([["src/a.ts", new Set([5, 6, 7])]]);
 
 describe("chooseEvent", () => {
-  it("requests changes only for bugs or risks", () => {
+  it("requests changes for bugs or risks, otherwise approves", () => {
     expect(chooseEvent(review([f("bug")]), pr, "me")).toBe("REQUEST_CHANGES");
     expect(chooseEvent(review([f("risk"), f("nit")]), pr, "me")).toBe("REQUEST_CHANGES");
-    expect(chooseEvent(review([f("nit"), f("question")]), pr, "me")).toBe("COMMENT");
-    expect(chooseEvent(review([]), pr, "me")).toBe("COMMENT");
+    expect(chooseEvent(review([f("nit"), f("question")]), pr, "me")).toBe("APPROVE");
+    expect(chooseEvent(review([]), pr, "me")).toBe("APPROVE");
   });
 
   it("comments on your own PR, which GitHub won't let you request changes on", () => {
@@ -70,6 +70,7 @@ describe("buildReview", () => {
     const carried: LedgerEntry[] = [
       {
         ...f("risk", 40),
+        mustFix: true,
         id: "F3",
         body: "Token TTL is in seconds. More detail.",
         sha: "a".repeat(40),
@@ -136,7 +137,7 @@ describe("buildReview", () => {
       commentable,
     });
     expect(draft.event).toBe("COMMENT");
-    expect(draft.body).toContain("does not allow requesting changes on your own PR");
+    expect(draft.body).toContain("does not allow approving or requesting changes on your own PR");
   });
 
   it("keeps the marker even when the body is trimmed", () => {
@@ -159,6 +160,7 @@ describe("buildFollowUpReview", () => {
       {
         id: "F4",
         severity: "risk",
+        mustFix: true,
         path: "src/a.ts",
         line: 5,
         body,

@@ -15,7 +15,8 @@ import {
   setPostingPaused,
   setReviewChoice,
 } from "../runtime.ts";
-import type { Job, JobStatus, State } from "../state.ts";
+import { APPROVED_BY_YOU, type Job, type JobStatus, type State } from "../state.ts";
+import type { PostedReview } from "../types.ts";
 import { renderPage } from "./page.ts";
 
 export interface StatusServerDeps {
@@ -24,6 +25,8 @@ export interface StatusServerDeps {
   runtime: Runtime;
   worker: { kick(): void; stop(jobId: number): boolean };
   log: Logger;
+  /** Approve the job's PR on GitHub, overriding the posted review. Off when not given. */
+  approve?: (job: Job) => Promise<PostedReview>;
   /** Tests pass 0 for a free port. */
   port?: number;
 }
@@ -100,7 +103,7 @@ async function readSavedReview(job: Job): Promise<unknown> {
  * that is only in the page itself, so other websites open in your browser cannot press them.
  */
 export async function startStatusServer(deps: StatusServerDeps): Promise<StatusServer | undefined> {
-  const { state, config, runtime, worker, log } = deps;
+  const { state, config, runtime, worker, log, approve } = deps;
   const token = randomBytes(24).toString("base64url");
   let port = deps.port ?? config.statusPage.port;
 
@@ -141,6 +144,29 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
     return after;
   }
 
+  /** Only a re-requested review (a follow-up) that is posted and not yet an approval. */
+  async function approveJob(job: Job): Promise<Job> {
+    if (!approve) throw new HttpError(404, "Approving is not available");
+    if (job.round < 2) throw new HttpError(409, "Approve is only for re-requested reviews");
+    if (job.status !== "done" || job.event === "APPROVED" || job.reason === "dry-run") {
+      throw new HttpError(409, `Can't approve a job that is ${job.status}`);
+    }
+    let posted: PostedReview;
+    try {
+      posted = await approve(job);
+    } catch (err) {
+      throw new HttpError(502, `GitHub: ${(err as Error).message}`);
+    }
+    state.completePublish(job.id, {
+      reviewId: posted.id,
+      url: posted.url,
+      event: posted.state,
+      reason: APPROVED_BY_YOU,
+    });
+    log.info({ job: job.id, repo: job.repo, pr: job.pr, url: posted.url }, "approved by you");
+    return state.get(job.id) as Job;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // DNS rebinding: a hostile name that resolves to 127.0.0.1 still sends its own Host.
     if (!allowedHosts().has(req.headers.host ?? "")) throw new HttpError(403, "Bad host");
@@ -150,6 +176,9 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
     if (req.method === "POST") {
       if (req.headers["x-proxy-token"] !== token) throw new HttpError(403, "Missing token");
       const jobAction = /^\/api\/jobs\/([^/]+)\/([a-z-]+)$/.exec(path);
+      if (jobAction?.[1] && jobAction[2] === "approve") {
+        return sendJson(res, 200, await approveJob(jobOr404(jobAction[1])));
+      }
       if (jobAction?.[1] && jobAction[2]) {
         return sendJson(res, 200, act(jobOr404(jobAction[1]), jobAction[2]));
       }
@@ -192,6 +221,7 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         postingPaused: isPostingPaused(state),
         pollIntervalSec: config.pollIntervalSec,
         publishMode: config.publish.mode,
+        canApprove: Boolean(approve),
         model,
         effort,
         models: MODELS,

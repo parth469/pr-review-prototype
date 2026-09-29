@@ -94,10 +94,8 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `followUp.enabled` | `true` | Check earlier findings when a PR you reviewed asks for you again. Off: every commit gets a full review |
 | `followUp.promptFile` | `prompts/follow-up.md` | Round-two prompt (adds `{{round}}`, `{{prevSha}}`, `{{ids}}`, `{{sinceNote}}`) |
 | `followUp.approve` | `submit` | `submit` approves at once · `pending` leaves every approval as a draft for you |
-| `followUp.explainedBugNeedsYou` | `true` | A 🔴 bug the author explained instead of fixing: the approval waits as a draft for you |
-| `followUp.explainedRiskNeedsYou` | `true` | The same for an explained 🟡 risk |
-| `followUp.requireGreenCi` | `true` | Never approve on red CI; wait for running checks. No CI configured: no wait |
-| `followUp.ciWaitMin` | `60` | How long to wait for running checks before posting a Comment instead |
+| `followUp.explainedBugNeedsYou` | `false` | `true`: a 🔴 bug the author explained instead of fixing waits as an approval draft for you. `false`: a reason that holds approves |
+| `followUp.explainedRiskNeedsYou` | `false` | The same for an explained 🟡 risk |
 | `followUp.maxAutoRounds` | `3` | Later rounds are only posted as a draft for you |
 | `followUp.freshReviewOverLines` | `1000` | A push this big since the last review (counting only files in the PR) gets a full review instead. Earlier open bugs and risks are listed in it and checked next round |
 | `followUp.resolveThreads` | `true` | Resolve threads whose finding is fixed, explained or gone |
@@ -108,8 +106,8 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 3. **Review.** Runs Claude in that folder through the Agent SDK with the prompt from `prompts/review.md`. Findings come back as JSON checked against a schema.
 4. **Save.** Writes everything to `reviews/<owner>-<repo>-<pr>-<sha>/`, marks the job `reviewed` and removes the checkout.
 5. **Publish.** Posts one review against the reviewed commit:
-   - **Request changes** when there is at least one 🔴 bug or 🟡 risk. Only 🔵 nits and ❓ questions, or nothing found, posts a plain **Comment**. A first review never approves; only a follow-up can.
-   - On your own PR it always posts a Comment, because GitHub does not allow requesting changes there.
+   - **Request changes** when there is at least one 🔴 bug or 🟡 risk. Only 🔵 nits and ❓ questions, or nothing found, **approves**; the nits stay as inline comments. Nits and questions never block.
+   - On your own PR it always posts a Comment, because GitHub does not allow approving or requesting changes there.
    - Findings on lines in the diff become inline comments; the rest are listed in the review body.
    - It posts nothing if the PR was closed or merged, has a newer commit, or no longer requests your review.
    - A hidden marker in the body means a restart or retry finds the earlier review instead of posting a second one.
@@ -126,11 +124,14 @@ When a new commit comes in on a PR whose earlier review is on GitHub, the job be
    - Only files in the PR count as changes, so merging the base branch in does not "fix" anything.
    - A 🔴/🟡 fixed only in another file, or fixed after a force-push, holds but goes to you (below).
 4. **Decide.** `src/decide.ts`, not Claude, picks the event:
-   - Any 🔴 bug or 🟡 risk not fixed or partly fixed, or a new one: **Request changes**.
-   - Red CI: **Comment** (fixes look good, CI failing). Running CI: wait, re-checking every 5 min up to `ciWaitMin`.
-   - An explained 🔴 bug or 🟡 risk, or a fix the checks above could not confirm: an **Approve draft** only you can see, and a "Needs your OK" notification. Submitting that draft as an approval accepts the explanation. If you delete it instead, the finding is checked again next round and comes back to you.
-   - Otherwise: **Approve**. Nits and questions never block.
+   - Every finding carries `mustFix`: always true for a 🔴 bug, true for a 🟡 risk only when it is serious (security, data loss, a crash, broken behaviour in production). Round one requests changes for any bug or risk; from round two on only `mustFix` findings block, so round two usually approves.
+   - A `mustFix` finding not fixed or partly fixed (and not explained), or a new `mustFix` finding in the new commits: **Request changes**. A minor risk left open is settled: it is never checked or raised again.
+   - CI plays no part: red or running checks never hold back an approval and are never mentioned.
+   - An explained finding whose reason holds: **Approve**. With `explainedBugNeedsYou`/`explainedRiskNeedsYou` on, it waits as an **Approve draft** for you instead.
+   - A `mustFix` fix the checks above could not confirm: an **Approve draft** only you can see, and a "Needs your OK" notification. Submitting it accepts the fix. If you delete it instead, the finding is checked again next round.
+   - Otherwise: **Approve**. Minor risks, nits and questions never block a follow-up. The body says what is left is non-blocking.
    - Your own PR: Comment. After `maxAutoRounds`: a draft for you.
+   - To overrule it, press **Approve** on the status page. It shows only on a posted follow-up (a re-requested review) that is not an approval yet. It submits the draft left for your OK as the approval, or posts a new approving review.
 5. **Post.** Creates the review as pending, replies in each finding's thread (skipped nits get no reply, only an "optional" row in the table), submits, then resolves the threads that are done. A crash midway resumes the same pending review without duplicate replies.
 
 GitHub allows one pending review per person per PR. While you have one on a PR (a draft left for you, or a review you started by hand), its jobs wait and re-check every 15 min, without running Claude or using attempts. The status page shows why.

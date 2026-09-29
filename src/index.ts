@@ -8,7 +8,7 @@ import { createLogger } from "./log.ts";
 import { createNotifier, notificationFor } from "./notify.ts";
 import { pollOnce, startPolling } from "./poller.ts";
 import { PreflightError, runPreflight } from "./preflight.ts";
-import { createPublisher } from "./publisher.ts";
+import { approveByHand, createPublisher } from "./publisher.ts";
 import { createFollowUpReviewer, createReviewer, resolvePluginPath } from "./reviewer.ts";
 import { createRuntime, isPostingPaused, recordPoll } from "./runtime.ts";
 import { openState } from "./state.ts";
@@ -157,7 +157,14 @@ try {
     }
   } else {
     const page = config.statusPage.enabled
-      ? await startStatusServer({ state, config, runtime, worker, log })
+      ? await startStatusServer({
+          state,
+          config,
+          runtime,
+          worker,
+          log,
+          approve: (job) => approveByHand(github as GitHub, viewer, job),
+        })
       : undefined;
     await Promise.all([
       startPolling(deps, signal),

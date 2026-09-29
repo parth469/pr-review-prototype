@@ -18,7 +18,9 @@ import { defaultConfig } from "./helpers.ts";
 const sampleReview = {
   summary: "Token check is unsafe.",
   verdict: "request_changes",
-  findings: [{ path: "src/auth.ts", line: 58, severity: "bug", body: "Use timingSafeEqual." }],
+  findings: [
+    { path: "src/auth.ts", line: 58, severity: "bug", mustFix: true, body: "Use timingSafeEqual." },
+  ],
 };
 
 function fakeQuery(

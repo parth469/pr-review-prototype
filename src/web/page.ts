@@ -131,6 +131,7 @@ var TOKEN = ${JSON.stringify(token).replace(/</g, "\\u003c")};
 var selected = null;
 var paused = false;
 var busy = false;
+var canApprove = false;
 
 function el(tag, attrs, children) {
   var node = document.createElement(tag);
@@ -167,7 +168,7 @@ function describe(job) {
   if (s === "done") {
     if (job.reason === "dry-run") return ["Dry run", "quiet", "Nothing posted"];
     if (job.event === "CHANGES_REQUESTED") return ["Requested changes", "change"];
-    if (job.event === "APPROVED") return ["Approved", "ok"];
+    if (job.event === "APPROVED") return ["Approved", "ok", job.reason === "approved by you" ? "Approved by you" : null];
     if (job.event === "PENDING") {
       return job.reason ? ["Needs your OK", "pending", job.reason.replace(/^needs your OK: /, "")] : ["Pending draft", "pending", "Only you can see it"];
     }
@@ -193,15 +194,19 @@ function actionsFor(job) {
   if (job.status === "preparing" || job.status === "reviewing") a.push(["stop", "Stop", "Stop this review now. Nothing is posted; Review now starts it again."]);
   if (job.status === "failed") a.push(["retry", "Retry", "Try again. A saved review is only posted, not re-run."]);
   if (job.status === "skipped") a.push(["review-now", "Review now", "Review it anyway, ignoring the skip rule."]);
+  // Only a re-requested review: approve it yourself, whatever the posted review said.
+  if (canApprove && job.round > 1 && job.status === "done" && job.event !== "APPROVED" && job.reason !== "dry-run")
+    a.push(["approve", "Approve", "Approve this PR on GitHub now, overriding the posted review. A draft left for your OK is submitted as the approval."]);
   if (["done", "reviewed", "failed"].indexOf(job.status) >= 0)
     a.push(["rereview", "Re-review", "Run Claude again on this commit. If a review of this commit is already on GitHub, it is not posted twice."]);
   return a;
 }
 function actionButton(job, action) {
-  var b = el("button", { type: "button", text: action[1], title: action[2], class: action[0] === "stop" ? "danger" : "" });
+  var b = el("button", { type: "button", text: action[1], title: action[2], class: action[0] === "stop" ? "danger" : action[0] === "approve" ? "primary" : "" });
   b.addEventListener("click", function (e) {
     e.stopPropagation();
     if (action[0] === "stop" && !confirm("Stop the review of " + job.repo + "#" + job.pr + "? Nothing is posted.")) return;
+    if (action[0] === "approve" && !confirm("Approve " + job.repo + "#" + job.pr + " on GitHub as you?")) return;
     b.disabled = true;
     api("/api/jobs/" + job.id + "/" + action[0], true)
       .then(function () { toast(action[1] + ": " + job.repo + "#" + job.pr); refresh(); })
@@ -213,6 +218,7 @@ function actionButton(job, action) {
 
 function renderStatus(st) {
   paused = st.postingPaused;
+  canApprove = st.canApprove;
   var facts = document.getElementById("facts");
   var ok = !st.lastPollError;
   facts.replaceChildren.apply(facts, [

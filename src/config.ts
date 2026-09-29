@@ -63,13 +63,10 @@ export const configSchema = z.object({
       promptFile: z.string().min(1).default("prompts/follow-up.md"),
       // submit: approve at once · pending: leave every approval as a draft for you to submit
       approve: z.enum(["submit", "pending"]).default("submit"),
-      // An "explained" bug is not accepted without you: the approval waits as a draft.
-      explainedBugNeedsYou: z.boolean().default(true),
-      // Same for an "explained" risk: the author's word alone never approves it.
-      explainedRiskNeedsYou: z.boolean().default(true),
-      // Never approve on red CI; wait for running checks up to ciWaitMin.
-      requireGreenCi: z.boolean().default(true),
-      ciWaitMin: z.number().int().min(0).default(60),
+      // true: an "explained" bug is not accepted without you, the approval waits as a draft.
+      explainedBugNeedsYou: z.boolean().default(false),
+      // Same for an "explained" risk.
+      explainedRiskNeedsYou: z.boolean().default(false),
       // Rounds after this one are only posted as a draft for you, to stop endless back and forth.
       maxAutoRounds: z.number().int().min(2).default(3),
       // A push this big since the last review gets a fresh full review instead.

@@ -51,6 +51,7 @@ describe("status server", () => {
   let server: StatusServer;
   let kicks: number;
   let running: Set<number>;
+  let approved: number[];
   let dir: string;
 
   const seed = (pr: number) =>
@@ -68,12 +69,17 @@ describe("status server", () => {
     dir = mkdtempSync(join(tmpdir(), "proxy-web-"));
     kicks = 0;
     running = new Set();
+    approved = [];
     const started = await startStatusServer({
       state,
       config: parseConfig({}),
       runtime: createRuntime("me"),
       worker: { kick: () => void kicks++, stop: (id) => running.delete(id) },
       log: silentLog,
+      approve: async (job) => {
+        approved.push(job.id);
+        return { id: 99, url: "https://github.com/acme/api/pull/1#r99", state: "APPROVED" };
+      },
       port: 0,
     });
     if (!started) throw new Error("server did not start");
@@ -193,6 +199,42 @@ describe("status server", () => {
     expect((await stop()).status).toBe(200);
     expect(running.has(job.id)).toBe(false);
     expect((await stop()).status).toBe(409);
+  });
+
+  it("approves a posted re-requested review, and nothing else", async () => {
+    // Round 1, posted as a request for changes.
+    seed(1);
+    const first = state.claimNext();
+    if (!first) throw new Error("no job");
+    state.completePublish(first.id, { reviewId: 1, url: "u1", event: "CHANGES_REQUESTED" });
+    // The author pushed again and re-requested: round 2, posted as a comment.
+    state.recordSeen({
+      repo: "acme/api",
+      pr: 1,
+      headSha: "sha1b",
+      title: "PR 1",
+      url: "u",
+      decision: { action: "queue" },
+    });
+    const claimed = state.claimNext();
+    if (!claimed) throw new Error("no job");
+    const second = state.linkParent(claimed.id);
+    expect(second?.round).toBe(2);
+    state.completePublish(claimed.id, { reviewId: 2, url: "u2", event: "COMMENTED" });
+
+    const approve = (id: number) =>
+      call(server.port, `/api/jobs/${id}/approve`, { method: "POST", token: server.token });
+    expect((await approve(first.id)).status).toBe(409); // round 1: not a re-request
+    const res = await approve(claimed.id);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      status: "done",
+      event: "APPROVED",
+      review_id: 99,
+      reason: "approved by you",
+    });
+    expect((await approve(claimed.id)).status).toBe(409); // already approved
+    expect(approved).toEqual([claimed.id]);
   });
 
   it("picks the model and effort for the next review, and refuses anything else", async () => {

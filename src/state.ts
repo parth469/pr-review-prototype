@@ -122,6 +122,8 @@ function migrate(db: DatabaseSync): void {
 
 /** Skip reason for a review stopped from the status page. */
 export const STOPPED_REASON = "stopped by you";
+/** Reason saved on a follow-up you approved by hand from the status page. */
+export const APPROVED_BY_YOU = "approved by you";
 
 export interface State {
   recordSeen(input: SeenInput): SeenResult;

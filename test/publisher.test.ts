@@ -5,11 +5,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.ts";
 import type { CheckedFinding } from "../src/followup.ts";
 import { reviewMarker } from "../src/publish.ts";
-import { createPublisher } from "../src/publisher.ts";
+import { approveByHand, createPublisher } from "../src/publisher.ts";
 import type { Finding, ReviewRun, Verdict } from "../src/reviewer.ts";
 import type { Job } from "../src/state.ts";
 import type {
-  CiState,
   CreateReviewPayload,
   PostedReview,
   PullRequest,
@@ -65,7 +64,6 @@ function fakeGitHub(
     existing?: PostedReview;
     failFirstPost?: { status: number };
     threads?: ReviewThread[];
-    ci?: CiState;
     failReply?: boolean;
   } = {},
 ): Fake {
@@ -120,7 +118,6 @@ function fakeGitHub(
     resolveThread: async (id) => {
       fake.resolved.push(id);
     },
-    getCiState: async () => opts.ci ?? "success",
   };
   return fake;
 }
@@ -353,7 +350,7 @@ describe("publisher: follow-up", () => {
     );
     expect(github.submitted[0]?.event).toBe("APPROVE");
     expect(github.replies.map((r) => r.thread)).toEqual(["T-F1"]);
-    expect(github.posts[0]?.body).toContain("❌ not fixed (optional)");
+    expect(github.posts[0]?.body).toContain("❌ not fixed (non-blocking)");
   });
 
   it("answers findings without a thread in the body", async () => {
@@ -363,29 +360,9 @@ describe("publisher: follow-up", () => {
     expect(github.posts[0]?.body).toContain("- **F1** ✅ fixed: Reply for F1.");
   });
 
-  it("waits for running CI without posting, then comments once the wait is over", async () => {
-    const github = fakeGitHub({ ci: "pending", threads: threadsFor(["F1"]) });
-    const previous = [checked("F1", "bug", "fixed")];
-    const waiting = await make(github).publish(fuJob, followUpRun(previous), outDir);
-    expect(waiting).toMatchObject({ kind: "wait", reason: "waiting for CI" });
-    expect(github.posts).toHaveLength(0);
-
-    const late = { ...fuJob, waiting_since: "2026-09-25T10:00:00Z" } as Job;
-    await make(github).publish(late, followUpRun(previous), outDir);
-    expect(github.submitted[0]?.event).toBe("COMMENT");
-    expect(github.posts[0]?.body).toContain("CI was still running after 60 min");
-  });
-
-  it("never approves on red CI", async () => {
-    const github = fakeGitHub({ ci: "failure" });
-    await make(github).publish(fuJob, followUpRun([checked("F1", "bug", "fixed", null)]), outDir);
-    expect(github.submitted[0]?.event).toBe("COMMENT");
-    expect(github.posts[0]?.body).toContain("CI is failing");
-  });
-
-  it("leaves an approval with an explained bug as a draft for you", async () => {
+  it("leaves an approval with an explained bug as a draft for you, when set to", async () => {
     const github = fakeGitHub({ threads: threadsFor(["F1"]) });
-    const result = await make(github).publish(
+    const result = await make(github, { followUp: { explainedBugNeedsYou: true } }).publish(
       fuJob,
       followUpRun([checked("F1", "bug", "explained")]),
       outDir,
@@ -454,7 +431,16 @@ describe("publisher: follow-up", () => {
       fuJob,
       followUpRun(
         [checked("F1", "bug", "fixed", null)],
-        [{ id: "F2", path: "src/a.ts", line: 2, severity: "risk", body: "New risk." }],
+        [
+          {
+            id: "F2",
+            path: "src/a.ts",
+            line: 2,
+            severity: "risk",
+            mustFix: true,
+            body: "New risk.",
+          },
+        ],
       ),
       outDir,
     );
@@ -474,5 +460,51 @@ describe("publisher: follow-up", () => {
     );
     expect(result).toMatchObject({ kind: "dry-run", draft: { event: "APPROVE" } });
     expect(github.posts).toHaveLength(0);
+  });
+});
+
+describe("approveByHand", () => {
+  const job = { repo: "acme/api", pr: 7, head_sha: "abc1234def" } as Job;
+  const posted = { id: 5, url: "u", state: "APPROVED", nodeId: "n" };
+
+  function fake(pending?: { id: number; body: string }) {
+    const calls: unknown[] = [];
+    return {
+      calls,
+      findPendingReview: async () => pending,
+      submitReview: async (_r: string, _n: number, id: number, event: string) => {
+        calls.push(["submit", id, event]);
+        return posted;
+      },
+      createReview: async (_r: string, _n: number, payload: unknown) => {
+        calls.push(["create", payload]);
+        return posted;
+      },
+    };
+  }
+
+  it("submits this commit's draft as the approval", async () => {
+    const github = fake({
+      id: 3,
+      body: `draft
+
+${reviewMarker(job.head_sha)}`,
+    });
+    await approveByHand(github, "me", job);
+    expect(github.calls).toEqual([["submit", 3, "APPROVE"]]);
+  });
+
+  it("posts a new approval when there is no draft", async () => {
+    const github = fake();
+    await approveByHand(github, "me", job);
+    expect(github.calls).toEqual([
+      ["create", { commit_id: job.head_sha, body: "Approved.", event: "APPROVE", comments: [] }],
+    ]);
+  });
+
+  it("refuses while another pending review of yours is in the way", async () => {
+    const github = fake({ id: 3, body: "something else" });
+    await expect(approveByHand(github, "me", job)).rejects.toThrow("unsubmitted pending review");
+    expect(github.calls).toEqual([]);
   });
 });

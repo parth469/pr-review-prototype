@@ -15,7 +15,6 @@ import {
 import type { ReviewRun } from "./reviewer.ts";
 import type { Job } from "./state.ts";
 import type {
-  CiState,
   CreateReviewPayload,
   PostedReview,
   PullRequest,
@@ -37,8 +36,8 @@ export type PublishResult =
   | { kind: "dry-run"; draft: ReviewDraft | FollowUpDraft }
   | { kind: "skipped"; reason: string }
   /**
-   * Not ready yet (CI running, or a pending review of yours in the way). Try again at retryAt
-   * without using an attempt. `ci: false`: not a CI wait, so the ciWaitMin clock does not start.
+   * Not ready yet (a pending review of yours in the way). Try again at retryAt without using
+   * an attempt. `ci: false`: not a CI wait, so the CI wait clock does not start.
    */
   | { kind: "wait"; reason: string; retryAt: Date; ci?: boolean };
 
@@ -65,7 +64,6 @@ export interface PublisherDeps {
 }
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
-const CI_RECHECK_MS = 5 * 60_000;
 export const PENDING_RECHECK_MS = 15 * 60_000;
 export const PENDING_REASON =
   "waiting: you have an unsubmitted pending review on this PR. Submit or delete it on GitHub";
@@ -204,25 +202,13 @@ export function createPublisher({
     const followUp = run.followUp;
     if (!followUp) throw new Error("not a follow-up");
     const settings = config.followUp;
-    const ci: CiState = settings.requireGreenCi
-      ? await github.getCiState(job.repo, job.head_sha)
-      : "none";
-    const at = now();
-    const waitedMs = job.waiting_since ? at.getTime() - Date.parse(job.waiting_since) : 0;
     const decision = decideFollowUp({
       previous: followUp.previous,
       newFindings: run.review.findings,
       ownPr: same(pr.author, viewer),
       round: followUp.round,
-      ci,
-      ciWaitOver: waitedMs >= settings.ciWaitMin * 60_000,
       settings,
     });
-    if (decision.kind === "wait") {
-      const left = settings.ciWaitMin * 60_000 - waitedMs;
-      const retryAt = new Date(at.getTime() + Math.max(Math.min(CI_RECHECK_MS, left), 1000));
-      return { kind: "wait", reason: decision.reason, retryAt, ci: true };
-    }
 
     const submit = decision.submit && config.publish.mode === "submit";
     const build = (noInline: boolean) =>
@@ -250,7 +236,7 @@ export function createPublisher({
           ...toPayload(draft),
           event: draft.event,
           submit,
-          decision: { reason: decision.reason, needsYou: decision.needsYou, ci },
+          decision: { reason: decision.reason, needsYou: decision.needsYou },
           replies: draft.replies,
         }),
       );
@@ -263,7 +249,6 @@ export function createPublisher({
         event: decision.event,
         submit,
         reason: decision.reason,
-        ci,
       },
       "follow-up decided",
     );
@@ -357,4 +342,33 @@ export function createPublisher({
       }
     },
   };
+}
+
+/**
+ * Approve a follow-up by hand, overriding the review that was posted. A draft of this commit
+ * left for your OK is submitted as the approval; otherwise a new approving review is posted.
+ */
+export async function approveByHand(
+  github: Pick<ReviewTarget, "createReview" | "submitReview"> & {
+    findPendingReview(
+      repo: string,
+      number: number,
+      viewer: string,
+    ): Promise<{ id: number; body: string } | undefined>;
+  },
+  viewer: string,
+  job: Job,
+): Promise<PostedReview> {
+  const pending = await github.findPendingReview(job.repo, job.pr, viewer);
+  if (pending?.body.includes(reviewMarker(job.head_sha))) {
+    return github.submitReview(job.repo, job.pr, pending.id, "APPROVE");
+  }
+  // GitHub allows one pending review per person per PR, and it is not ours to submit.
+  if (pending) throw new Error(PENDING_REASON.replace(/^waiting: /, ""));
+  return github.createReview(job.repo, job.pr, {
+    commit_id: job.head_sha,
+    body: "Approved.",
+    event: "APPROVE",
+    comments: [],
+  });
 }
