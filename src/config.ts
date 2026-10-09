@@ -6,6 +6,9 @@ export const MODELS = ["claude-opus-5-5", "claude-sonnet-5-5"] as const;
 export const EFFORTS = ["low", "medium", "high"] as const;
 export type Model = (typeof MODELS)[number];
 export type Effort = (typeof EFFORTS)[number];
+/** How findings are written; also pickable on the status page. See docs/review-styles.html. */
+export const STYLES = ["readable", "caveman-readable", "caveman-classic"] as const;
+export type Style = (typeof STYLES)[number];
 
 const repoPattern = z
   .string()
@@ -38,9 +41,8 @@ export const configSchema = z.object({
       effort: z.enum(EFFORTS).default("high"),
       // Hold reviews while the 5-hour session usage is at or above this percent. null = never.
       maxSessionUsagePct: z.number().min(1).max(100).nullable().default(90),
-      skill: z.string().min(1).default("caveman:caveman-review"),
-      promptFile: z.string().min(1).default("prompts/review.md"),
-      // Plugin that provides the skill. null = look up the installed "caveman@caveman" plugin.
+      style: z.enum(STYLES).default("readable"),
+      // Folder of the caveman plugin, for the caveman styles. null = the installed "caveman@caveman".
       pluginPath: z.string().min(1).nullable().default(null),
       timeoutMin: z.number().positive().default(20),
       maxTurns: z.number().int().positive().default(80),
@@ -60,7 +62,6 @@ export const configSchema = z.object({
     .object({
       // Re-requested review on a PR you reviewed before: check the earlier findings, then decide.
       enabled: z.boolean().default(true),
-      promptFile: z.string().min(1).default("prompts/follow-up.md"),
       // submit: approve at once · pending: leave every approval as a draft for you to submit
       approve: z.enum(["submit", "pending"]).default("submit"),
       // true: an "explained" bug is not accepted without you, the approval waits as a draft.

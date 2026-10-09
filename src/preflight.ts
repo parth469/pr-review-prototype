@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Config } from "./config.ts";
+import { type Config, STYLES } from "./config.ts";
+import { type PluginId, STYLE_SPECS } from "./styles.ts";
 
 export interface CheckResult {
   name: string;
@@ -17,7 +18,7 @@ export interface PreflightDeps {
   gitVersion: () => Promise<string>;
   /** Returns the GitHub login, or throws with the reason. */
   githubLogin: () => Promise<string>;
-  pluginPath: () => Promise<string>;
+  pluginPath: (plugin: PluginId) => Promise<string>;
   exists?: (path: string) => boolean;
   writable?: (dir: string) => Promise<void>;
 }
@@ -80,21 +81,23 @@ export async function runPreflight(config: Config, deps: PreflightDeps): Promise
   await check("github", true, async () => `logged in as ${await deps.githubLogin()}`);
 
   if (config.review.enabled) {
-    await check("review skill", true, async () => {
-      const plugin = await deps.pluginPath();
-      const skillName = config.review.skill.split(":").pop() ?? config.review.skill;
-      const skillFile = join(plugin, "skills", skillName, "SKILL.md");
-      if (!exists(skillFile)) {
-        throw new Error(`${skillFile} is missing. Check review.skill and review.pluginPath.`);
-      }
-      return config.review.skill;
-    });
-    await check("prompt", true, async () => {
-      if (!exists(config.review.promptFile)) {
-        throw new Error(`${config.review.promptFile} is missing. Check review.promptFile.`);
-      }
-      return config.review.promptFile;
-    });
+    // Every style can be picked on the status page, but only the default one must work to start.
+    for (const style of STYLES) {
+      const spec = STYLE_SPECS[style];
+      await check(`style ${style}`, style === config.review.style, async () => {
+        const skillName = spec.skill.split(":").pop() ?? spec.skill;
+        const skillFile = join(await deps.pluginPath(spec.plugin), "skills", skillName, "SKILL.md");
+        if (!exists(skillFile)) {
+          const hint =
+            spec.plugin === "caveman" ? " Install caveman or set review.pluginPath." : "";
+          throw new Error(`${skillFile} is missing.${hint}`);
+        }
+        for (const prompt of [spec.reviewPrompt, spec.followUpPrompt]) {
+          if (!exists(prompt)) throw new Error(`${prompt} is missing.`);
+        }
+        return spec.label;
+      });
+    }
   }
 
   for (const dir of [config.dataDir, config.logDir, config.reviewsDir, config.cacheDir]) {

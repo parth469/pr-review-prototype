@@ -26,6 +26,7 @@ import {
   type SessionUsage,
 } from "./runtime.ts";
 import { type Job, STOPPED_REASON, type State } from "./state.ts";
+import { type PluginId, STYLE_SPECS } from "./styles.ts";
 import type { FollowUpSource, PostedReview } from "./types.ts";
 import { HeadMovedError, type PreparedWorkspace, type Workspace } from "./workspace.ts";
 
@@ -37,7 +38,8 @@ export interface WorkerDeps {
   config: Config;
   log: Logger;
   /** Resolved lazily so a missing plugin fails the job with a clear error, not startup. */
-  pluginPath: () => Promise<string>;
+  /** Folder of the plugin a review style loads. */
+  pluginPath: (plugin: PluginId) => Promise<string>;
   /** Notable outcomes, e.g. for desktop notifications. Must not throw. */
   onEvent?: (event: WorkerEvent) => void;
   /** While true, reviews still run but wait as `reviewed` instead of being posted. */
@@ -159,8 +161,9 @@ export function createWorker(deps: WorkerDeps): Worker {
   ): Promise<{ run: ReviewRun; outDir: string } | undefined> {
     // An earlier commit may have been posted since this one was queued.
     const job = state.linkParent(queued.id) ?? queued;
-    // Read now: a model or effort picked on the status page applies from the next review on.
+    // Read now: a model, effort or style picked on the status page applies from the next review on.
     const settings = reviewSettings(state, config);
+    const style = STYLE_SPECS[settings.style];
     log.info({ ...fields, round: job.round, attempt: job.attempts + 1 }, "preparing");
     let prepared: PreparedWorkspace | undefined;
     const stopper = new AbortController();
@@ -175,14 +178,14 @@ export function createWorker(deps: WorkerDeps): Worker {
       const outDir = resolve(config.reviewsDir, prepared.slug);
       await mkdir(outDir, { recursive: true });
       const vars = {
-        skill: config.review.skill,
+        skill: style.skill,
         repo: job.repo,
         number: job.pr,
         sha: job.head_sha,
         baseRef: prepared.pr.baseRef,
       };
       const prompt = context
-        ? await loadPrompt(config.followUp.promptFile, {
+        ? await loadPrompt(style.followUpPrompt, {
             ...vars,
             round: job.round,
             prevSha: context.prevSha.slice(0, 7),
@@ -191,7 +194,7 @@ export function createWorker(deps: WorkerDeps): Worker {
               ? ""
               : "History was rewritten since then (force-push), so `.review/since-last.patch` is the whole PR diff.",
           })
-        : await loadPrompt(config.review.promptFile, vars);
+        : await loadPrompt(style.reviewPrompt, vars);
       const inputs = context ? ["previous.json", "threads.json", "since-last.patch"] : [];
       await Promise.all([
         writeFile(join(outDir, "prompt.md"), prompt),
@@ -209,6 +212,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           followUp: Boolean(context),
           model: settings.model,
           effort: settings.effort,
+          style: settings.style,
         },
         "reviewing",
       );
@@ -216,7 +220,7 @@ export function createWorker(deps: WorkerDeps): Worker {
         cwd: prepared.dir,
         prompt,
         settings,
-        pluginPath: await deps.pluginPath(),
+        pluginPath: await deps.pluginPath(style.plugin),
         transcriptPath: join(outDir, "transcript.jsonl"),
         signal: jobSignal,
         onUsage: (usage: SessionUsage) => recordSessionUsage(state, usage),
@@ -224,7 +228,11 @@ export function createWorker(deps: WorkerDeps): Worker {
       let run: ReviewRun;
       if (context && deps.followUp) {
         const { output, ...stats } = await deps.followUp.run(input);
-        run = { ...stats, ...finalizeFollowUp(context, output, prepared.diff, log) };
+        run = {
+          ...stats,
+          ...finalizeFollowUp(context, output, prepared.diff, log),
+          style: settings.style,
+        };
       } else {
         const first = await runReview(input);
         // After earlier rounds, new ids continue after theirs so every F-id stays unique.
@@ -232,6 +240,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...first,
           review: { ...first.review, findings: numberFindings(first.review.findings, nextId) },
           ...(carried.length > 0 ? { carried } : {}),
+          style: settings.style,
         };
       }
       // Stopped just as Claude finished: still nothing gets posted.

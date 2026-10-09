@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { z } from "zod";
-import { type Config, EFFORTS, MODELS } from "../config.ts";
+import { type Config, EFFORTS, MODELS, STYLES } from "../config.ts";
 import type { Logger } from "../log.ts";
 import {
   currentSessionUsage,
@@ -16,6 +16,7 @@ import {
   setReviewChoice,
 } from "../runtime.ts";
 import { APPROVED_BY_YOU, type Job, type JobStatus, type State } from "../state.ts";
+import { STYLE_SPECS } from "../styles.ts";
 import type { PostedReview } from "../types.ts";
 import { renderPage } from "./page.ts";
 
@@ -74,6 +75,7 @@ const sendJson = (res: ServerResponse, status: number, value: unknown) =>
 const reviewChoiceSchema = z.strictObject({
   model: z.enum(MODELS).optional(),
   effort: z.enum(EFFORTS).optional(),
+  style: z.enum(STYLES).optional(),
 });
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -193,9 +195,9 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         const parsed = reviewChoiceSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
         setReviewChoice(state, parsed.data);
-        const { model, effort } = reviewSettings(state, config);
-        log.info({ model, effort }, "review settings changed");
-        return sendJson(res, 200, { model, effort });
+        const { model, effort, style } = reviewSettings(state, config);
+        log.info({ model, effort, style }, "review settings changed");
+        return sendJson(res, 200, { model, effort, style });
       }
       throw new HttpError(404, "Not found");
     }
@@ -211,7 +213,7 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
       });
     }
     if (path === "/api/status") {
-      const { model, effort } = reviewSettings(state, config);
+      const { model, effort, style } = reviewSettings(state, config);
       const counts = Object.fromEntries(
         STATUSES.map((s) => [s, state.listByStatus(s).length]).filter(([, n]) => n),
       );
@@ -224,8 +226,10 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         canApprove: Boolean(approve),
         model,
         effort,
+        style,
         models: MODELS,
         efforts: EFFORTS,
+        styles: STYLES.map((key) => ({ key, label: STYLE_SPECS[key].label })),
         sessionUsage: currentSessionUsage(state) ?? null,
         maxSessionUsagePct: config.review.maxSessionUsagePct,
         counts,

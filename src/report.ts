@@ -1,3 +1,4 @@
+import { fenced, isStructured } from "./finding-text.ts";
 import type { Finding, ReviewRun } from "./reviewer.ts";
 import type { PullRequest } from "./types.ts";
 
@@ -33,6 +34,27 @@ function location(f: Finding): string {
   return f.endLine && f.endLine !== f.line
     ? `${f.path}:${f.line}-${f.endLine}`
     : `${f.path}:${f.line}`;
+}
+
+/** One finding as markdown list lines: the readable parts nested under its title. */
+function findingLines(f: Finding): string[] {
+  const id = f.id ? `**${f.id}** ` : "";
+  const head = `- ${id}**${SEVERITY_LABEL[f.severity]}** \`${location(f)}\``;
+  if (!isStructured(f)) return [`${head}: ${f.body ?? ""}`];
+  const nest = (text: string) =>
+    text
+      .replace(/\n+$/, "")
+      .split("\n")
+      .map((line) => `    ${line}`);
+  return [
+    `${head}: **${f.title}**`,
+    `  - What's wrong: ${f.problem}`,
+    `  - What happens if not fixed: ${f.impact}`,
+    `  - Fix: ${f.fix}`,
+    ...(f.suggestion ? ["  - Suggested code:", ...nest(fenced(f.suggestion))] : []),
+    "  - Why I think so:",
+    ...nest(f.why),
+  ];
 }
 
 /** Local, human-readable copy of the review. M3 builds the GitHub review from result.json. */
@@ -74,15 +96,14 @@ export function renderReviewMarkdown(pr: PullRequest, run: ReviewRun): string {
   if (review.findings.length > 0) {
     lines.push(followUp ? "## New findings" : "## Findings", "");
     for (const f of sortFindings(review.findings)) {
-      const id = f.id ? `**${f.id}** ` : "";
-      lines.push(`- ${id}**${SEVERITY_LABEL[f.severity]}** \`${location(f)}\`: ${f.body}`);
+      lines.push(...findingLines(f));
     }
     lines.push("");
   }
   if (run.carried && run.carried.length > 0) {
     lines.push("## Still open from earlier reviews (not checked this time)", "");
     for (const f of run.carried) {
-      lines.push(`- **${f.id}** **${SEVERITY_LABEL[f.severity]}** \`${location(f)}\`: ${f.body}`);
+      lines.push(...findingLines(f));
     }
     lines.push("");
   }

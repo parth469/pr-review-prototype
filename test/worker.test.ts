@@ -109,7 +109,7 @@ describe("worker", () => {
       publisher,
       config: parseConfig({ reviewsDir: join(root, "reviews"), review: { maxAttempts } }),
       log: silentLog,
-      pluginPath: async () => "/plugins/caveman",
+      pluginPath: async (plugin) => `/plugins/${plugin}`,
       onEvent: (e) => void events.push(e),
       isPostingPaused: () => pausedFlag,
     });
@@ -180,9 +180,11 @@ describe("worker", () => {
       ["F1", "bug"],
       ["F2", "nit"],
     ]);
-    expect(readFileSync(join(out, "prompt.md"), "utf8").startsWith("/caveman:caveman-review")).toBe(
-      true,
-    );
+    // The default style: the bundled skill and the readable-format prompt.
+    const prompt = readFileSync(join(out, "prompt.md"), "utf8");
+    expect(prompt.startsWith("/proxy-reviewer:readable-review")).toBe(true);
+    expect(prompt).toContain("`title`, `problem`, `impact`");
+    expect(saved.style).toBe("readable");
     expect(ws.cleaned).toBe(1);
   });
 
@@ -298,6 +300,25 @@ describe("worker", () => {
       return review(input);
     }).processOne();
     expect(seen[0]?.settings).toMatchObject({ model: "claude-sonnet-5-5", effort: "low" });
+  });
+
+  it("uses the style picked on the status page: its prompt, skill and plugin", async () => {
+    const seen: RunReviewInput[] = [];
+    const review = countingReview();
+    setReviewChoice(state, { style: "caveman-classic" });
+    await make(fakeWorkspace(root), async (input) => {
+      seen.push(input);
+      return review(input);
+    }).processOne();
+    expect(seen[0]?.settings.style).toBe("caveman-classic");
+    expect(seen[0]?.pluginPath).toBe("/plugins/caveman");
+    expect(seen[0]?.prompt.startsWith("/caveman:caveman-review")).toBe(true);
+    // The old-format prompt asks for one free-text body, not the readable parts.
+    expect(seen[0]?.prompt).toContain("Explain each problem and the fix");
+    const out = join(root, "reviews", "acme-api-128-3f9c2e1");
+    expect(JSON.parse(readFileSync(join(out, "result.json"), "utf8")).style).toBe(
+      "caveman-classic",
+    );
   });
 
   it("holds reviews while the session usage is at the limit, until the window resets", async () => {

@@ -149,6 +149,52 @@ describe("buildReview", () => {
   });
 });
 
+describe("buildReview with readable findings", () => {
+  const readable = (line: number, endLine?: number): Finding => ({
+    path: "src/a.ts",
+    line,
+    ...(endLine ? { endLine } : {}),
+    severity: "bug",
+    id: "F1",
+    title: "Stop button may not stop the request",
+    problem: "A cancel is missed.",
+    impact: "The request keeps running.",
+    fix: "Check `signal.aborted` first.",
+    suggestion: "  if (signal?.aborted) abort();",
+    why: "- Listener added after the await.",
+  });
+  const build = (f: Finding) => buildReview({ review: review([f]), pr, viewer: "me", commentable });
+
+  it("puts the title in the heading and the parts below it", () => {
+    const body = build(readable(5)).comments[0]?.body ?? "";
+    expect(body).toMatch(/^\*\*F1 · 🔴 bug: Stop button may not stop the request\*\*\n\n/);
+    expect(body).toContain("**What happens if not fixed:** The request keeps running.");
+    expect(body).toContain("```suggestion\n  if (signal?.aborted) abort();\n```");
+    expect(body).toContain("<details><summary>Why I think so</summary>");
+  });
+
+  it("keeps the suggestion when the comment covers the whole range", () => {
+    const draft = build(readable(5, 7));
+    expect(draft.comments[0]).toMatchObject({ start_line: 5, line: 7 });
+    expect(draft.comments[0]?.body).toContain("```suggestion");
+  });
+
+  it("drops the suggestion when the range leaves the diff", () => {
+    const draft = build(readable(5, 40));
+    expect(draft.comments[0]).toMatchObject({ line: 5 });
+    expect(draft.comments[0]?.body).not.toContain("```suggestion");
+    expect(draft.comments[0]?.body).toContain("**Fix:** Check `signal.aborted` first.");
+  });
+
+  it("lists a finding off the diff in the body without a suggestion", () => {
+    const draft = build(readable(99));
+    expect(draft.body).toContain(
+      "#### F1 · 🔴 bug: Stop button may not stop the request\n`src/a.ts:99`",
+    );
+    expect(draft.body).not.toContain("```suggestion");
+  });
+});
+
 describe("buildFollowUpReview", () => {
   const followUp = (linear: boolean, body: string): FollowUpResult => ({
     round: 3,

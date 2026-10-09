@@ -19,7 +19,17 @@ const sampleReview = {
   summary: "Token check is unsafe.",
   verdict: "request_changes",
   findings: [
-    { path: "src/auth.ts", line: 58, severity: "bug", mustFix: true, body: "Use timingSafeEqual." },
+    {
+      path: "src/auth.ts",
+      line: 58,
+      severity: "bug",
+      mustFix: true,
+      title: "Login token check can leak the token",
+      problem: "The token is compared in a way that takes longer the more of it matches.",
+      impact: "An attacker can guess the token one character at a time.",
+      fix: "Compare with `timingSafeEqual`.",
+      why: "- `src/auth.ts:58` uses `===` on the raw token.",
+    },
   ],
 };
 
@@ -35,6 +45,7 @@ function fakeQuery(
   }) as unknown as typeof query;
 }
 
+const READABLE = "proxy-reviewer:readable-review";
 const init = (skills: string[]) => ({ type: "system", subtype: "init", skills });
 const success = (structured_output: unknown) => ({
   type: "result",
@@ -50,7 +61,7 @@ function input(): RunReviewInput {
   const dir = mkdtempSync(join(tmpdir(), "proxy-reviewer-"));
   return {
     cwd: dir,
-    prompt: "/caveman:caveman-review ...",
+    prompt: "/proxy-reviewer:readable-review ...",
     settings: defaultConfig.review,
     pluginPath: "/plugins/caveman",
     transcriptPath: join(dir, "transcript.jsonl"),
@@ -83,9 +94,7 @@ describe("reviewSchema", () => {
 describe("createReviewer", () => {
   it("runs locked down and returns the parsed review", async () => {
     const seen: { options?: Options | undefined } = {};
-    const run = createReviewer(
-      fakeQuery([init(["caveman:caveman-review"]), success(sampleReview)], seen),
-    );
+    const run = createReviewer(fakeQuery([init([READABLE]), success(sampleReview)], seen));
     const args = input();
     const result = await run(args);
 
@@ -107,23 +116,50 @@ describe("createReviewer", () => {
 
   it("fails when the skill did not load", async () => {
     const run = createReviewer(fakeQuery([init(["other:skill"]), success(sampleReview)]));
-    await expect(run(input())).rejects.toThrow(/caveman:caveman-review did not load/);
+    await expect(run(input())).rejects.toThrow(/proxy-reviewer:readable-review did not load/);
   });
 
   it("fails on an error result", async () => {
     const run = createReviewer(
       fakeQuery([
-        init(["caveman:caveman-review"]),
+        init([READABLE]),
         { type: "result", subtype: "error_max_turns", errors: ["too many turns"] },
       ]),
     );
     await expect(run(input())).rejects.toThrow(/error_max_turns: too many turns/);
   });
 
-  it("fails when the output has the wrong shape", async () => {
+  it("asks for one free-text body per finding in the old-format style", async () => {
+    const classic = {
+      ...sampleReview,
+      findings: [{ path: "src/a.ts", line: 3, severity: "nit", mustFix: false, body: "Rename x." }],
+    };
+    const seen: { options?: Options | undefined } = {};
     const run = createReviewer(
-      fakeQuery([init(["caveman:caveman-review"]), success({ summary: "x" })]),
+      fakeQuery([init(["caveman:caveman-review"]), success(classic)], seen),
     );
+    const args = {
+      ...input(),
+      settings: { ...defaultConfig.review, style: "caveman-classic" as const },
+    };
+    const result = await run(args);
+    expect(result.style).toBe("caveman-classic");
+    expect(result.review.findings[0]?.body).toBe("Rename x.");
+    const schema = JSON.stringify(seen.options?.outputFormat);
+    expect(schema).toContain('"body"');
+    expect(schema).not.toContain('"title"');
+    // A readable review is the wrong shape for the old format, and the other way round.
+    const wrong = createReviewer(
+      fakeQuery([init(["caveman:caveman-review"]), success(sampleReview)]),
+    );
+    await expect(wrong(args)).rejects.toThrow(/wrong shape/);
+    await expect(
+      createReviewer(fakeQuery([init([READABLE]), success(classic)]))(input()),
+    ).rejects.toThrow(/wrong shape/);
+  });
+
+  it("fails when the output has the wrong shape", async () => {
+    const run = createReviewer(fakeQuery([init([READABLE]), success({ summary: "x" })]));
     await expect(run(input())).rejects.toThrow(/wrong shape/);
   });
 });
@@ -156,9 +192,10 @@ describe("session usage", () => {
 
   it("reports it during a run", async () => {
     const seen: number[] = [];
-    await createReviewer(
-      fakeQuery([init(["caveman:caveman-review"]), event, success(sampleReview)]),
-    )({ ...input(), onUsage: (u) => seen.push(u.utilization) });
+    await createReviewer(fakeQuery([init([READABLE]), event, success(sampleReview)]))({
+      ...input(),
+      onUsage: (u) => seen.push(u.utilization),
+    });
     expect(seen).toEqual([43]);
   });
 });
