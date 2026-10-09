@@ -4,11 +4,13 @@ A local background process that finds GitHub PRs where you are a requested revie
 
 **Status: M6 (follow-up review).** It finds review requests, checks out each PR, has Claude review it, and posts the review to the PR under your account: a summary plus one inline comment per finding. When the author pushes fixes and asks for your review again, it checks each earlier finding, replies in its thread, and approves or asks only for what is still open. Design: [`docs/follow-up-review.html`](docs/follow-up-review.html).
 
+Each finding is written so a person can judge it and an AI tool can fix it: a plain title, what's wrong, what happens if it's not fixed, the fix (with a one-click GitHub suggestion when safe), and the reasoning folded underneath. Three review styles can be picked on the status page; why, what each costs and what we picked: [`docs/review-styles.html`](docs/review-styles.html).
+
 ## Requirements
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
 - [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`. The daemon reuses that login.
 - [Claude Code](https://code.claude.com/), logged in. Reviews use your Claude Code login through the Agent SDK.
-- The `caveman` Claude Code plugin (provides `/caveman:caveman-review`), or another skill set in `review.skill` and `review.pluginPath`.
+- Only for the two caveman review styles: the `caveman` Claude Code plugin (provides `/caveman:caveman-review`). The default style uses the skill in `plugin/`, which ships with this repo.
 
 ## Setup
 ```sh
@@ -44,6 +46,8 @@ Open **http://localhost:4777** while the server runs. It lists recent PRs with t
 | **Review now** | skipped | Reviews it anyway, ignoring the skip rule (draft, too large...). |
 | **Pause posting / Resume** | header | While paused, reviews still run and wait unposted. Resume posts them. Survives restarts. |
 
+The header also has **Model**, **Effort** and **Style** pickers for the next review. Style is how findings are written: *New skill + new format* (default), *Caveman + new format* or *Caveman + old format*. A pick applies from the next review on, survives restarts, and a running review keeps what it started with. See [`docs/review-styles.html`](docs/review-styles.html).
+
 It listens on 127.0.0.1 only. Buttons need a secret token that is only in the page, and requests for other host names are refused, so other websites open in your browser can't press them. Turn it off or move it with `statusPage.enabled` and `statusPage.port`.
 
 ## Commands
@@ -75,9 +79,8 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `review.model` | `claude-opus-5-5` | `claude-opus-5-5` or `claude-sonnet-5-5`. Default only: a pick on the status page wins |
 | `review.effort` | `high` | `low`, `medium` or `high`. Default only, like `model` |
 | `review.maxSessionUsagePct` | `90` | Reviews wait in the queue while the 5-hour session usage is at or above this percent, until the window resets. `null` = never |
-| `review.skill` | `caveman:caveman-review` | Skill named on the first line of the prompt |
-| `review.promptFile` | `prompts/review.md` | Prompt template (`{{skill}}`, `{{repo}}`, `{{number}}`, `{{sha}}`, `{{baseRef}}`) |
-| `review.pluginPath` | `null` | Plugin folder; `null` finds the installed `caveman@caveman` |
+| `review.style` | `readable` | `readable` (new skill + new format), `caveman-readable` or `caveman-classic` (the format before issue #6). Default only, like `model`. Each style's skill, plugin and prompts are in `src/styles.ts` |
+| `review.pluginPath` | `null` | Caveman plugin folder, for the caveman styles; `null` finds the installed `caveman@caveman` |
 | `review.timeoutMin` | `20` | Stop a review after this long |
 | `review.maxTurns` | `80` | Stop a review after this many turns |
 | `review.maxAttempts` | `3` | Tries before a job is marked `failed` (retries after 5 and 20 min) |
@@ -92,7 +95,6 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `publish.mode` | `submit` | `submit` posts at once · `pending` leaves a draft only you can see · `dry-run` posts nothing and writes the payload |
 | `publish.requireStillRequested` | `true` | Don't post if you are no longer a requested reviewer (for example, you already reviewed by hand). `--review` ignores this |
 | `followUp.enabled` | `true` | Check earlier findings when a PR you reviewed asks for you again. Off: every commit gets a full review |
-| `followUp.promptFile` | `prompts/follow-up.md` | Round-two prompt (adds `{{round}}`, `{{prevSha}}`, `{{ids}}`, `{{sinceNote}}`) |
 | `followUp.approve` | `submit` | `submit` approves at once · `pending` leaves every approval as a draft for you |
 | `followUp.explainedBugNeedsYou` | `false` | `true`: a 🔴 bug the author explained instead of fixing waits as an approval draft for you. `false`: a reason that holds approves |
 | `followUp.explainedRiskNeedsYou` | `false` | The same for an explained 🟡 risk |

@@ -1,4 +1,12 @@
-import { type Config, EFFORTS, type Effort, MODELS, type Model } from "./config.ts";
+import {
+  type Config,
+  EFFORTS,
+  type Effort,
+  MODELS,
+  type Model,
+  STYLES,
+  type Style,
+} from "./config.ts";
 import type { PollSummary } from "./poller.ts";
 import type { State } from "./state.ts";
 
@@ -43,31 +51,36 @@ export function setPostingPaused(state: Pick<State, "setSetting">, paused: boole
 
 const REVIEW_MODEL = "review_model";
 const REVIEW_EFFORT = "review_effort";
+const REVIEW_STYLE = "review_style";
 
 const isModel = (v: string | undefined): v is Model => MODELS.includes(v as Model);
 const isEffort = (v: string | undefined): v is Effort => EFFORTS.includes(v as Effort);
+const isStyle = (v: string | undefined): v is Style => STYLES.includes(v as Style);
 
-/** Review settings for the next review: config, with the status page's model and effort on top. */
+/** Review settings for the next review: config, with the status page's picks on top. */
 export function reviewSettings(
   state: Pick<State, "getSetting">,
   config: Pick<Config, "review">,
 ): Config["review"] {
   const model = state.getSetting(REVIEW_MODEL);
   const effort = state.getSetting(REVIEW_EFFORT);
+  const style = state.getSetting(REVIEW_STYLE);
   return {
     ...config.review,
     ...(isModel(model) ? { model } : {}),
     ...(isEffort(effort) ? { effort } : {}),
+    ...(isStyle(style) ? { style } : {}),
   };
 }
 
 /** Saved in the database, so the choice survives restarts. Running reviews keep theirs. */
 export function setReviewChoice(
   state: Pick<State, "setSetting">,
-  choice: { model?: Model | undefined; effort?: Effort | undefined },
+  choice: { model?: Model | undefined; effort?: Effort | undefined; style?: Style | undefined },
 ): void {
   if (choice.model) state.setSetting(REVIEW_MODEL, choice.model);
   if (choice.effort) state.setSetting(REVIEW_EFFORT, choice.effort);
+  if (choice.style) state.setSetting(REVIEW_STYLE, choice.style);
 }
 
 const SESSION_USAGE = "session_usage";

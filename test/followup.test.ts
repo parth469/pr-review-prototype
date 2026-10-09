@@ -75,6 +75,8 @@ const thread = (id: string, body: string, extra: Partial<ReviewThread> = {}): Re
   ...extra,
 });
 
+const text = (t: string) => ({ title: t, problem: t, impact: t, fix: t, why: t });
+
 describe("helpers", () => {
   it("counts added and deleted lines, not file headers", () => {
     expect(countChangedLines(SINCE)).toBe(2);
@@ -261,6 +263,40 @@ describe("prepareFollowUp", () => {
     ]);
     expect(t.conversation).toEqual([{ by: "PR author", at: "t", body: "Pushed fixes." }]);
     expect(read("since-last.patch")).toBe(SINCE);
+  });
+
+  it("hands Claude old-format and readable findings each in their own shape", async () => {
+    // Round 1 in the old format (F1), with a readable finding (F2), e.g. after a style change.
+    const mixed: ReviewRun = {
+      ...firstRun,
+      review: {
+        ...firstRun.review,
+        findings: [
+          firstRun.review.findings[0] as ReviewRun["review"]["findings"][number],
+          {
+            id: "F2",
+            path: "src/a.ts",
+            line: 10,
+            severity: "nit",
+            title: "Vague name",
+            problem: "The name x says nothing.",
+            impact: "Nothing breaks.",
+            fix: "Rename `x` to `count`.",
+            why: "- `src/a.ts:10`",
+          },
+        ],
+      },
+    };
+    const dir = checkout();
+    await prepareFollowUp(
+      { source: fakeSource(), viewer: "me", log: silentLog },
+      { ...prepareInput(dir), parentRun: mixed },
+    );
+    const previous = JSON.parse(readFileSync(join(dir, ".review", "previous.json"), "utf8"));
+    expect(previous[0]).toMatchObject({ id: "F1", body: "Unsafe compare." });
+    expect(previous[0]).not.toHaveProperty("title");
+    expect(previous[1]).toMatchObject({ id: "F2", title: "Vague name", why: "- `src/a.ts:10`" });
+    expect(previous[1]).not.toHaveProperty("body");
   });
 
   it("uses the whole PR diff after a force-push", async () => {
@@ -588,16 +624,35 @@ describe("finalizeFollowUp", () => {
           verdict("F2", "fixed", [{ path: "src/a.ts", line: 2 }]),
         ],
         findings: [
-          { path: "src/a.ts", line: 2, severity: "risk", mustFix: true, body: "New risk." },
-          { path: "src/a.ts", line: 10, severity: "bug", mustFix: true, body: "Untouched code." },
-          { path: "src/a.ts", line: 3, severity: "bug", mustFix: true, body: "Context line only." },
+          { path: "src/a.ts", line: 2, severity: "risk", mustFix: true, ...text("New risk.") },
+          {
+            path: "src/a.ts",
+            line: 10,
+            severity: "bug",
+            mustFix: true,
+            ...text("Untouched code."),
+          },
+          {
+            path: "src/a.ts",
+            line: 3,
+            severity: "bug",
+            mustFix: true,
+            ...text("Context line only."),
+          },
         ],
       },
       PR_DIFF,
       silentLog,
     );
     expect(review.findings).toEqual([
-      { id: "F3", path: "src/a.ts", line: 2, severity: "risk", mustFix: true, body: "New risk." },
+      {
+        id: "F3",
+        path: "src/a.ts",
+        line: 2,
+        severity: "risk",
+        mustFix: true,
+        ...text("New risk."),
+      },
     ]);
     expect(review.verdict).toBe("request_changes");
     expect(followUp.ledger.map((e) => [e.id, e.status, e.sha.slice(0, 1), e.round])).toEqual([

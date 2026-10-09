@@ -24,8 +24,7 @@ describe("config", () => {
         model: "claude-opus-5-5",
         effort: "high",
         maxSessionUsagePct: 90,
-        skill: "caveman:caveman-review",
-        promptFile: "prompts/review.md",
+        style: "readable",
         pluginPath: null,
         timeoutMin: 20,
         maxTurns: 80,
@@ -35,7 +34,6 @@ describe("config", () => {
       publish: { mode: "submit", requireStillRequested: true },
       followUp: {
         enabled: true,
-        promptFile: "prompts/follow-up.md",
         approve: "submit",
         explainedBugNeedsYou: false,
         explainedRiskNeedsYou: false,
@@ -58,10 +56,21 @@ describe("config", () => {
     expect(() => parseConfig({ review: { effort: "max" } })).toThrow(/effort/);
   });
 
-  it("matches the committed config.json: defaults, limited to Axy-K-Git", async () => {
+  it("matches the committed config.json: defaults, limited to Axy-K-Git, drafts and big PRs in", async () => {
     expect(await loadConfig("config.json")).toEqual(
-      parseConfig({ repos: { allow: ["Axy-Science/Axy-K-Git"], deny: [] } }),
+      parseConfig({
+        repos: { allow: ["Axy-Science/Axy-K-Git"], deny: [] },
+        skipDrafts: false,
+        maxChangedLines: 10000,
+      }),
     );
+  });
+
+  it("offers three review styles and still loads a config from before them", () => {
+    expect(() => parseConfig({ review: { style: "terse" } })).toThrow(/style/);
+    const old = parseConfig({ review: { skill: "caveman:caveman-review", promptFile: "x.md" } });
+    expect(old.review.style).toBe("readable");
+    expect(old.review).not.toHaveProperty("skill");
   });
 
   it("rejects bad repo patterns and short intervals", () => {

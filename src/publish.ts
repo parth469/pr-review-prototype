@@ -1,3 +1,4 @@
+import { findingMarkdown, findingTitle, isStructured } from "./finding-text.ts";
 import { type FollowUpResult, findingMarker, type LedgerEntry, replyMarker } from "./followup.ts";
 import { sortFindings } from "./report.ts";
 import { type Finding, mustFix, type Review, type Verdict } from "./reviewer.ts";
@@ -41,6 +42,24 @@ const PLURAL: Record<Finding["severity"], [string, string]> = {
 /** "**F2 · 🔴 bug**": the id lets the author name a finding in a PR comment. */
 function tag(f: Finding): string {
   return f.id ? `**${f.id} · ${LABEL[f.severity]}**` : `**${LABEL[f.severity]}**`;
+}
+
+/** An inline comment: "**F1 · 🔴 bug: title**" and the parts, or a legacy body after the tag. */
+function inlineBody(f: Finding, suggestion: boolean): string {
+  if (!isStructured(f)) return `${tag(f)} ${f.body ?? ""}`;
+  const label = f.id ? `${f.id} · ${LABEL[f.severity]}` : LABEL[f.severity];
+  return `**${label}: ${f.title}**\n\n${findingMarkdown(f, { suggestion })}`;
+}
+
+/** A finding listed in the review body, where no suggestion can apply. */
+function listedFinding(f: Finding): string {
+  if (!isStructured(f)) return `- ${tag(f)} \`${at(f)}\` ${f.body ?? ""}`;
+  const label = f.id ? `${f.id} · ${LABEL[f.severity]}` : LABEL[f.severity];
+  return `#### ${label}: ${f.title}\n\`${at(f)}\`\n\n${findingMarkdown(f)}`;
+}
+
+function listFindings(findings: Finding[]): string {
+  return findings.map(listedFinding).join(findings.some(isStructured) ? "\n\n" : "\n");
 }
 
 const blocksEvent = (f: Pick<Finding, "severity">) => f.severity === "bug" || f.severity === "risk";
@@ -107,17 +126,21 @@ export function buildReview({
       continue;
     }
     const marker = f.id ? `\n\n${findingMarker(pr.headSha, f.id)}` : "";
+    const ranged = Boolean(f.endLine && f.endLine > f.line);
+    // A range becomes a multi-line comment ending at endLine, if every end is commentable.
+    const spansRange = ranged && lines.has(f.endLine as number);
+    // A suggestion replaces exactly the lines the comment covers, so it needs the full range.
+    const suggestion = !ranged || spansRange;
     const comment: InlineComment = {
       path: f.path,
       line: f.line,
       side: "RIGHT",
-      body: `${trim(`${tag(f)} ${f.body}`)}${marker}`,
+      body: `${trim(inlineBody(f, suggestion))}${marker}`,
     };
-    // A range becomes a multi-line comment ending at endLine, if every end is commentable.
-    if (f.endLine && f.endLine > f.line && lines.has(f.endLine)) {
+    if (spansRange) {
       comment.start_line = f.line;
       comment.start_side = "RIGHT";
-      comment.line = f.endLine;
+      comment.line = f.endLine as number;
     }
     comments.push(comment);
   }
@@ -127,16 +150,14 @@ export function buildReview({
   if (review.findings.length > 0) parts.push(`**${countFindings(review.findings)}**`);
   if (outside.length > 0) {
     const heading = comments.length > 0 ? "Other findings" : "Findings";
-    parts.push(
-      `### ${heading}\n\n${outside.map((f) => `- ${tag(f)} \`${at(f)}\` ${f.body}`).join("\n")}`,
-    );
+    parts.push(`### ${heading}\n\n${listFindings(outside)}`);
   }
   if (carried.length > 0) {
     parts.push(
       [
         "### Still open from earlier reviews",
         "Too much changed for a follow-up, so this is a full review. These earlier points were not checked this time; the next round checks them:",
-        carried.map((f) => `- ${tag(f)} \`${at(f)}\` ${headline(f.body)}`).join("\n"),
+        carried.map((f) => `- ${tag(f)} \`${at(f)}\` ${headline(f)}`).join("\n"),
       ].join("\n\n"),
     );
   }
@@ -189,12 +210,9 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   not_fixed: "❌ not fixed",
 };
 const DONE: Verdict[] = ["fixed", "explained", "no_longer_applies"];
-/** One table cell: the first sentence of a finding, on one line, without breaking the table. */
-function headline(text: string, max = 90): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  const sentence = /^(.+?[.!?])(\s|$)/.exec(flat)?.[1] ?? flat;
-  const cut = sentence.length > max ? `${sentence.slice(0, max - 1).trimEnd()}…` : sentence;
-  return cut.replace(/\|/g, "\\|");
+/** One table cell: the finding's title, on one line, without breaking the table. */
+function headline(f: Finding): string {
+  return findingTitle(f).replace(/\|/g, "\\|");
 }
 
 function at(f: Finding): string {
@@ -225,7 +243,7 @@ export function buildFollowUpReview(input: FollowUpBuildInput): FollowUpDraft {
   for (const p of followUp.previous) {
     const optional = !mustFix(p) && !DONE.includes(p.verdict);
     rows.push(
-      `| ${p.id} | ${LABEL[p.severity]} \`${at(p)}\` ${headline(p.body)} | ${VERDICT_LABEL[p.verdict]}${optional ? " (non-blocking)" : ""} |`,
+      `| ${p.id} | ${LABEL[p.severity]} \`${at(p)}\` ${headline(p)} | ${VERDICT_LABEL[p.verdict]}${optional ? " (non-blocking)" : ""} |`,
     );
     if (!DONE.includes(p.verdict)) leftOpen = true;
     if (optional) continue;
@@ -257,11 +275,7 @@ export function buildFollowUpReview(input: FollowUpBuildInput): FollowUpDraft {
   }
   if (base.outside.length > 0) {
     const heading = base.comments.length > 0 ? "Other new findings" : "New findings";
-    parts.push(
-      `### ${heading}\n\n${base.outside
-        .map((f) => `- ${tag(f)} \`${at(f)}\` ${f.body}`)
-        .join("\n")}`,
-    );
+    parts.push(`### ${heading}\n\n${listFindings(base.outside)}`);
   }
   if (noThread.length > 0 || base.outside.length > 0) {
     parts.push("_To answer a point listed here, name its id (for example F2) in a PR comment._");

@@ -237,7 +237,7 @@ describe("status server", () => {
     expect(approved).toEqual([claimed.id]);
   });
 
-  it("picks the model and effort for the next review, and refuses anything else", async () => {
+  it("picks the model, effort and style for the next review, and refuses anything else", async () => {
     const set = (body: unknown) =>
       call(server.port, "/api/review-settings", {
         method: "POST",
@@ -250,19 +250,29 @@ describe("status server", () => {
       effort: "high",
       models: ["claude-opus-5-5", "claude-sonnet-5-5"],
       efforts: ["low", "medium", "high"],
+      style: "readable",
+      styles: [
+        { key: "readable", label: "New skill + new format" },
+        { key: "caveman-readable", label: "Caveman + new format" },
+        { key: "caveman-classic", label: "Caveman + old format" },
+      ],
       sessionUsage: null,
     });
 
     expect(JSON.parse((await set({ model: "claude-sonnet-5-5" })).body)).toEqual({
       model: "claude-sonnet-5-5",
       effort: "high",
+      style: "readable",
     });
     await set({ effort: "low" });
-    expect(await status()).toMatchObject({ model: "claude-sonnet-5-5", effort: "low" });
+    await set({ style: "caveman-classic" });
+    const picked = { model: "claude-sonnet-5-5", effort: "low", style: "caveman-classic" };
+    expect(await status()).toMatchObject(picked);
 
     expect((await set({ effort: "max" })).status).toBe(400);
     expect((await set({ model: "gpt-5" })).status).toBe(400);
-    expect(await status()).toMatchObject({ model: "claude-sonnet-5-5", effort: "low" });
+    expect((await set({ style: "terse" })).status).toBe(400);
+    expect(await status()).toMatchObject(picked);
   });
 
   it("gives up quietly when the port is taken", async () => {

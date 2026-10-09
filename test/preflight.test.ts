@@ -9,7 +9,7 @@ function deps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
     nodeVersion: "v24.21.0",
     gitVersion: async () => "git version 2.50.0",
     githubLogin: async () => "me",
-    pluginPath: async () => "/plugins/caveman",
+    pluginPath: async (plugin) => `/plugins/${plugin}`,
     exists: () => true,
     writable: async () => undefined,
     ...overrides,
@@ -57,11 +57,33 @@ describe("runPreflight", () => {
     expect(err.message).toContain("Install Git for Windows");
   });
 
-  it("checks the skill file inside the plugin", async () => {
+  it("checks the default style's skill file inside its plugin", async () => {
     const err = await failure({
-      exists: (p) => !p.replace(/\\/g, "/").includes("caveman-review/SKILL.md"),
+      exists: (p) => !p.replace(/\\/g, "/").includes("readable-review/SKILL.md"),
     });
-    expect(err.message).toMatch(/review skill: .*caveman-review[\\/]SKILL\.md is missing/);
+    expect(err.message).toMatch(
+      /style readable: .*bundled.*readable-review[\\/]SKILL\.md is missing/,
+    );
+  });
+
+  it("only warns about caveman when the default style does not need it", async () => {
+    const noCaveman = async (plugin: string) => {
+      if (plugin === "bundled") return "/plugins/bundled";
+      throw new Error("Plugin caveman@caveman is not installed.");
+    };
+    const results = await runPreflight(config, deps({ pluginPath: noCaveman }));
+    expect(
+      results.filter((r) => r.name.startsWith("style ")).map((r) => [r.name, r.ok, r.fatal]),
+    ).toEqual([
+      ["style readable", true, true],
+      ["style caveman-readable", false, false],
+      ["style caveman-classic", false, false],
+    ]);
+    // With a caveman style as the default, a missing caveman stops startup.
+    const classic = parseConfig({ review: { style: "caveman-classic" } });
+    await expect(runPreflight(classic, deps({ pluginPath: noCaveman }))).rejects.toThrow(
+      /style caveman-classic: Plugin caveman@caveman is not installed/,
+    );
   });
 
   it("stops when a folder is not writable", async () => {
@@ -78,6 +100,6 @@ describe("runPreflight", () => {
       parseConfig({ review: { enabled: false } }),
       deps({ exists: () => false }),
     );
-    expect(results.map((r) => r.name)).not.toContain("review skill");
+    expect(results.map((r) => r.name)).not.toContain("style readable");
   });
 });

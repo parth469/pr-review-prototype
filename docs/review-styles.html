@@ -1,0 +1,373 @@
+<title>Review Styles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root{
+  --ground:#F3F5F7;--surface:#FFFFFF;--sunken:#E8ECF0;
+  --ink:#16202B;--ink-2:#4A5866;--ink-3:#7A8794;--rule:#D5DCE3;
+  --accent:#1F5F8B;--accent-soft:#DCE9F3;
+  --change:#B8401E;--change-soft:#F8E3DA;
+  --ok:#2F7A4A;--ok-soft:#DDEFE3;
+  --warn:#9A6B00;--warn-soft:#F6ECD2;
+  --code-bg:#0F1720;--code-ink:#D8E1EA;--code-dim:#7F90A0;--code-key:#8CC4F0;--code-str:#E7B98A;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --cond:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0E141A;--surface:#151D25;--sunken:#1C2630;
+    --ink:#E4EAF0;--ink-2:#A9B6C2;--ink-3:#76858F;--rule:#2A3642;
+    --accent:#72AEDB;--accent-soft:#1A3043;
+    --change:#F08A62;--change-soft:#3A1F16;
+    --ok:#6CC08A;--ok-soft:#16301F;
+    --warn:#E0B24A;--warn-soft:#352A10;
+    --code-bg:#0A0F14;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0E141A;--surface:#151D25;--sunken:#1C2630;
+  --ink:#E4EAF0;--ink-2:#A9B6C2;--ink-3:#76858F;--rule:#2A3642;
+  --accent:#72AEDB;--accent-soft:#1A3043;
+  --change:#F08A62;--change-soft:#3A1F16;
+  --ok:#6CC08A;--ok-soft:#16301F;
+  --warn:#E0B24A;--warn-soft:#352A10;
+  --code-bg:#0A0F14;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;padding-inline:16px;padding-block:0 64px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shell{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px}
+@media (max-width:880px){.shell{grid-template-columns:minmax(0,1fr);gap:0}.toc{display:none}}
+.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 32px);align-self:start;padding-top:40px;font-size:14px}
+.toc p{font-family:var(--cond);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--ink-3);margin:0 0 12px}
+.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;counter-reset:t}
+.toc li{counter-increment:t}
+.toc a{color:var(--ink-2);text-decoration:none;display:flex;gap:10px}
+.toc a::before{content:counter(t,decimal-leading-zero);font-family:var(--mono);font-size:12px;color:var(--ink-3);padding-top:2px}
+.toc a:hover{color:var(--accent)}
+main{min-width:0}
+header.top{padding-block:40px 32px;border-bottom:1px solid var(--rule)}
+.eyebrow{font-family:var(--mono);font-size:13px;color:var(--ink-3);margin:0 0 12px}
+h1{font-family:var(--cond);font-weight:700;font-size:clamp(34px,5vw,48px);line-height:1.08;margin:0 0 16px;letter-spacing:-.01em;text-wrap:balance}
+.lede{font-size:18px;color:var(--ink-2);max-width:64ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font-family:var(--mono);font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--sunken);color:var(--ink-2);border:1px solid var(--rule)}
+.chip.change{background:var(--change-soft);color:var(--change);border-color:transparent}
+.chip.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.chip.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+section{padding-block:40px 8px}
+h2{font-family:var(--cond);font-weight:600;font-size:28px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-weight:400;font-size:15px;color:var(--ink-3);margin-right:10px;vertical-align:3px}
+h3{font-family:var(--cond);font-weight:600;font-size:19px;margin:28px 0 8px}
+p,li{max-width:68ch}
+.sub{color:var(--ink-2);margin:0 0 20px}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunken);padding:1px 5px;border-radius:4px}
+pre.code{background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:13.5px;line-height:1.55;padding:18px 20px;border-radius:8px;overflow-x:auto;margin:12px 0 20px}
+pre.code .c{color:var(--code-dim)}
+pre.code .k{color:var(--code-key)}
+pre.code .s{color:var(--code-str)}
+.diagram{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:20px;overflow-x:auto;margin:16px 0 8px}
+.diagram pre.mermaid{margin:0;background:transparent;text-align:center}
+.cap{font-size:13.5px;color:var(--ink-3);margin:0 0 16px}
+.tablewrap{overflow-x:auto;margin:12px 0 20px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:600px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--cond);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);background:var(--sunken)}
+tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+.v{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:500;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.v.fixed{background:var(--ok-soft);color:var(--ok)}
+.v.explained{background:var(--accent-soft);color:var(--accent)}
+.v.partial{background:var(--warn-soft);color:var(--warn)}
+.v.open{background:var(--change-soft);color:var(--change)}
+.v.gone{background:var(--sunken);color:var(--ink-2)}
+.block{font-family:var(--mono);font-size:12px}
+.block.yes{color:var(--change)}
+.block.no{color:var(--ok)}
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:16px 0}
+.box{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:16px 18px}
+.box h3{margin-top:0}
+.box ul{margin:0;padding-left:18px;font-size:15px}
+.box li{margin:4px 0}
+.box.now{border-top:3px solid var(--ink-3)}
+.box.next{border-top:3px solid var(--ok)}
+.gh{background:var(--surface);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:16px 0 8px}
+.gh-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule);background:var(--sunken);flex-wrap:wrap}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--surface);display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:500;flex:none}
+.avatar.author{background:var(--ink-3)}
+.who{font-weight:600}
+.what{color:var(--ink-2)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:2px 10px;border-radius:999px}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%}
+.badge.ok{background:var(--ok-soft);color:var(--ok)}
+.badge.ok::before{background:var(--ok)}
+.gh-body{padding:16px 18px;font-size:14.5px}
+.gh-body h4{margin:0 0 8px;font-size:15px}
+.gh-body table{min-width:0;font-size:13.5px;margin:8px 0 4px}
+.gh-body td,.gh-body th{padding:6px 10px}
+.thread{border-top:1px solid var(--rule)}
+.thread .path{font-family:var(--mono);font-size:12.5px;padding:8px 16px;background:var(--sunken);color:var(--ink-2);border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.resolved{font-family:var(--sans);font-size:12px;color:var(--ok);font-weight:600}
+.comment{padding:10px 16px;display:flex;gap:10px;font-size:14px;border-top:1px solid var(--rule)}
+.comment:first-of-type{border-top:0}
+.comment p{margin:0}
+.comment .muted{color:var(--ink-3)}
+.callout{border:1px solid var(--rule);border-left:3px solid var(--warn);background:var(--surface);padding:14px 18px;border-radius:0 8px 8px 0;margin:16px 0;font-size:15px}
+.callout.risk{border-left-color:var(--change)}
+.callout b{font-family:var(--cond);font-weight:600}
+.ms{display:flex;flex-direction:column;margin:16px 0;border-left:2px solid var(--rule)}
+.m{position:relative;padding:0 0 22px 24px}
+.m::before{content:"";position:absolute;left:-7px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--accent)}
+.m .t{font-family:var(--cond);font-weight:600;font-size:18px}
+.m .t small{font-family:var(--mono);font-weight:400;font-size:12.5px;color:var(--ink-3);margin-left:8px}
+.m p{margin:4px 0 0;color:var(--ink-2);font-size:15px}
+.m .done{font-size:13.5px;color:var(--ink-3);margin-top:4px}
+</style>
+<style>
+.ex{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 18px;margin:12px 0 20px;font-size:14.5px}
+.ex p{margin:0 0 8px}
+.ex .lbl{font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-bottom:6px}
+.ex pre{background:var(--sunken);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:13px;overflow-x:auto;margin:8px 0}
+.ex details summary{cursor:pointer;color:var(--ink-2)}
+.ex ul{margin:6px 0 0;padding-left:18px}
+.ex.pick{border-top:3px solid var(--ok)}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#problem">The problem (issue #6)</a></li>
+    <li><a href="#options">Formats we looked at</a></li>
+    <li><a href="#format">The new format</a></li>
+    <li><a href="#styles">The three styles</a></li>
+    <li><a href="#test">The test and its cost</a></li>
+    <li><a href="#examples">Real examples</a></li>
+    <li><a href="#decision">What we picked and why</a></li>
+    <li><a href="#switch">How to switch</a></li>
+    <li><a href="#code">Where it lives in the code</a></li>
+    <li><a href="#caveats">Caveats and open points</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">reivew-prototype / design · issue #6 readable findings · 2026-10-09</p>
+  <h1>Review styles: findings a person can judge and an AI can fix</h1>
+  <p class="lede">Posted review comments were accurate but hard to judge: a person could not tell quickly why the reviewer asked for a change, or whether it was real. Findings now come in plain-word parts with the evidence folded underneath, and you can pick how reviews are written on the status page. This page records what we found, what we tried, what it costs, and what we picked.</p>
+  <div class="meta">
+    <span class="chip ok">default: New skill + new format</span>
+    <span class="chip">Caveman + new format</span>
+    <span class="chip">Caveman + old format</span>
+    <span class="chip accent">pick on the status page</span>
+  </div>
+</header>
+
+<section id="problem">
+  <h2><span class="n">01</span>The problem (issue #6)</h2>
+  <p class="sub">"When a human tries to assess a requested change, they can't even tell why the AI requested it."</p>
+  <p>We checked the system and 88 inline comments it had posted. The complaint held up, for three reasons:</p>
+  <div class="compare">
+    <div class="box now">
+      <h3>What a finding looked like</h3>
+      <ul>
+        <li>One free-text <code>body</code> per finding: problem, impact and fix mixed in one paragraph</li>
+        <li>Median 472 characters, up to 1,511, dense with function and variable names</li>
+        <li>The effect on users was buried, or missing</li>
+        <li>No separate evidence: nothing said what the reviewer read to reach the claim</li>
+        <li>A guess and a proven bug looked the same</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Why</h3>
+      <ul>
+        <li>The prompt began with <code>/caveman:caveman-review</code>, a skill whose rules are "one line per finding: location, problem, fix" and "drop restating what the line does"</li>
+        <li>The prompt asked for the opposite ("explain each problem and the fix"), so Claude compromised: long, but compressed</li>
+        <li>The output schema had one text field, so nothing forced the parts apart</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="options">
+  <h2><span class="n">02</span>Formats we looked at</h2>
+  <p class="sub">Five shapes, each tried on the same real finding (PR #1929, F1: the Stop button may not stop a request).</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Option</th><th>Idea</th><th>Outcome</th></tr></thead>
+    <tbody>
+      <tr><td>A · Labeled sections</td><td>What's wrong / What happens if not fixed / Fix / Why I think so</td><td><b>Picked</b>, combined with D</td></tr>
+      <tr><td>B · Story</td><td>Step-by-step scenario of how it breaks</td><td>Good for some bugs, too long for most findings</td></tr>
+      <tr><td>C · Confidence + check it yourself</td><td>Confidence level, how to verify, what would prove it wrong</td><td>Not as separate fields; "Why I think so" now says what was and wasn't verified</td></tr>
+      <tr><td>D · One plain line, details folded</td><td>Short visible part, technical detail in <code>&lt;details&gt;</code></td><td><b>Picked</b>, combined with A</td></tr>
+      <tr><td>E · Mix of C and D</td><td>Plain line + confidence + verification</td><td>Folded into A + D</td></tr>
+      <tr><td>+ Suggestion box</td><td>GitHub <code>```suggestion</code> block with the exact new code</td><td><b>Added</b> when safe: one click for a person, exact code for an AI tool</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout"><b>Will an AI fixer still understand it?</b> Yes. AI tools read PR comments through the GitHub API as raw markdown, so the folded part is plain text to them. The labels mark which part is the instruction (Fix) and which is the reasoning (Why). The one rule that keeps this working: the Fix and Why parts must keep exact file, function and variable names.</div>
+</section>
+
+<section id="format">
+  <h2><span class="n">03</span>The new format</h2>
+  <p class="sub">Each finding is six fields in the structured output. Our code lays them out, so the layout costs no tokens and the skill cannot break it.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Field</th><th>Shown as</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>title</code></td><td><b>F1 · 🔴 bug: Stop button may not stop the request</b></td><td>Plain words, the effect, no code names</td></tr>
+      <tr><td><code>problem</code></td><td>What's wrong</td><td>One or two plain sentences, no code names</td></tr>
+      <tr><td><code>impact</code></td><td>What happens if not fixed</td><td>What a user sees or what breaks. For a nit: say nothing breaks and why it still matters</td></tr>
+      <tr><td><code>fix</code></td><td>Fix</td><td>Exact files, functions, variables</td></tr>
+      <tr><td><code>suggestion</code> (optional)</td><td>GitHub suggestion box</td><td>Exact new code for lines <code>line..endLine</code>; only when the whole fix is inside those lines and applying it alone leaves the code working</td></tr>
+      <tr><td><code>why</code></td><td>▶ Why I think so (folded)</td><td>Short bullets of what was read or traced, with exact names; says what was not verified</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><b>Suggestion safety in code:</b> a suggestion replaces exactly the lines the comment covers. If a range finding's end line is not in the diff, the comment falls back to one line, and the suggestion box is dropped (the Fix text stays).</li>
+    <li><b>Findings off the diff</b> go in the review body under a <code>#### F2 · 🟡 risk: title</code> heading with the same parts, never with a suggestion box.</li>
+    <li><b>Old reviews keep working:</b> findings saved with one <code>body</code> show exactly as before, on GitHub, in <code>review.md</code> and on the status page.</li>
+    <li>The field is named <code>why</code>, not <code>evidence</code>, because round-two verdicts already have an <code>evidence</code> field, and the ledger strips it between rounds.</li>
+  </ul>
+</section>
+
+<section id="styles">
+  <h2><span class="n">04</span>The three styles</h2>
+  <p class="sub">A style decides the skill, the plugin, the prompts and the output shape. Only the chosen style's plugin is loaded into a review.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Key</th><th>Label</th><th>Skill</th><th>Prompts</th><th>Findings</th></tr></thead>
+    <tbody>
+      <tr><td><code>readable</code> (default)</td><td>New skill + new format</td><td><code>proxy-reviewer:readable-review</code> from <code>plugin/</code> in this repo</td><td><code>prompts/review.md</code>, <code>prompts/follow-up.md</code></td><td>Six parts</td></tr>
+      <tr><td><code>caveman-readable</code></td><td>Caveman + new format</td><td><code>caveman:caveman-review</code> (installed plugin)</td><td>same as above</td><td>Six parts</td></tr>
+      <tr><td><code>caveman-classic</code></td><td>Caveman + old format</td><td><code>caveman:caveman-review</code></td><td><code>prompts/review-classic.md</code>, <code>prompts/follow-up-classic.md</code></td><td>One <code>body</code>, as before issue #6</td></tr>
+    </tbody>
+  </table></div>
+  <p>The new skill (<code>plugin/skills/readable-review/SKILL.md</code>, about 2.3 KB; caveman's is 2.8 KB) is just a text file of writing rules: who reads a finding (a person who may not know the code, and the author or their AI tool), how to write each part, what the severities mean, and what to avoid. It is loaded the same way caveman is, through the first line of the prompt. No new program or service.</p>
+</section>
+
+<section id="test">
+  <h2><span class="n">05</span>The test and its cost</h2>
+  <p class="sub">PR #2023 (68 files, +4398 / −383), same commit <code>cf0200b</code>, Opus 5.5, high effort, dry run, nothing posted. One run per style.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Style</th><th>Cost</th><th>Input tokens</th><th>Output tokens</th><th>Time</th><th>Findings</th></tr></thead>
+    <tbody>
+      <tr><td>Caveman + old format</td><td>$1.20</td><td>548k</td><td>16.8k</td><td>3.0 min</td><td>5 (1 bug, 1 risk, 3 nits)</td></tr>
+      <tr><td>Caveman + new format</td><td>$1.49 (+24%)</td><td>1.00M</td><td>23.3k</td><td>4.5 min</td><td>3 (2 risks, 1 nit), 1 suggestion</td></tr>
+      <tr><td>New skill + new format</td><td>$1.99 (+66%)</td><td>1.04M</td><td>35.1k</td><td>6.3 min</td><td>5 (3 risks, 2 nits), 3 suggestions</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout risk"><b>Read these numbers with care.</b> One run each. The three runs found different problems and read different amounts of code; both new-format runs read about twice as much. Most of the cost is Claude reading the code, not the skill or the format. The gap between the two new-format runs is mostly output tokens, and that run also wrote more findings and more suggestions. Run each style two or three more times before treating the percentages as fixed.</div>
+  <p>For scale: the 25 reviews saved before this test used 100k–4.5M input tokens and 3k–31k output tokens, $0.34–$2.96 each.</p>
+  <h3>Each run found different things</h3>
+  <ul>
+    <li>Only the old-format run caught the <code>DIFFERENT RELATIONSHIPS</code> bypass (a bug).</li>
+    <li>Only Caveman + new format caught the spaced-arrow bypass.</li>
+    <li>Only New skill + new format caught the control-character bypass and pattern comprehensions.</li>
+  </ul>
+  <p>That variation comes from the model, not the format. It's also why one run per style can't settle quality.</p>
+</section>
+
+<section id="examples">
+  <h2><span class="n">06</span>Real examples</h2>
+  <p class="sub">From the PR #2023 runs: the same nit in the old and new format, then a Caveman + new format risk.</p>
+  <div class="ex">
+    <div class="lbl">Caveman + old format</div>
+    <p><b>F4 · 🔵 nit</b> The comment says <code>"cancel"</code> and <code>"payment_method_update"</code> are both accepted. <code>BillingPortalFlowSchema</code> is <code>z.enum(["payment_method_update"])</code>, so only one value is valid. Fix the comment so it matches the schema.</p>
+  </div>
+  <div class="ex pick">
+    <div class="lbl">New skill + new format</div>
+    <p><b>F4 · 🔵 nit: A test comment names an allowed value that the server actually rejects</b></p>
+    <p><b>What's wrong:</b> The comment says both "cancel" and "payment_method_update" are accepted. The request schema accepts only "payment_method_update".<br>
+    <b>What happens if not fixed:</b> Nothing breaks. A reader may assume a "cancel" flow exists and write a client or test against it.<br>
+    <b>Fix:</b> Change the comment to say that only "payment_method_update" is accepted.</p>
+    <pre>Suggested change
+  // Rejected at validation, before any Stripe call: only
+  // "payment_method_update" is accepted.</pre>
+    <details><summary>Why I think so</summary><ul>
+      <li><code>schemas/api-gateway/src/billing.ts</code>: <code>BillingPortalFlowSchema = z.enum(["payment_method_update"])</code></li>
+      <li><code>createBillingPortalSession</code> types <code>flow</code> as <code>"payment_method_update"</code> only</li>
+    </ul></details>
+  </div>
+  <div class="ex">
+    <div class="lbl">Caveman + new format</div>
+    <p><b>F2 · 🟡 risk: Repeated path groups slip through when the arrow is written with spaces</b></p>
+    <p><b>What's wrong:</b> The check for a repeated path group like ((a)--&gt;(b))+ only spots arrows whose dashes touch each other. Writing ((a) - - &gt; (b)){1,100} is not seen as a path, so the query is allowed.<br>
+    <b>What happens if not fixed:</b> One query can make ArcadeDB list every path up to 100 hops. That is the memory or CPU blow-up this PR exists to stop, and it hits every knowledge graph on the server.<br>
+    <b>Fix:</b> In <code>hasQuantifiedGroup</code>, remove whitespace from <code>group</code> before testing it against <code>RELATIONSHIP_ARROW</code>.</p>
+    <pre>Suggested change
+    if (!isFunctionCall &amp;&amp; RELATIONSHIP_ARROW.test(group.replace(/\s+/g, "")))
+      return true;</pre>
+    <details><summary>Why I think so</summary><ul>
+      <li><code>RELATIONSHIP_ARROW</code> (L195): the bare-arrow forms need the characters to touch</li>
+      <li><code>QUANTIFIED_RELATIONSHIP</code> already allows spaces, so the two checks disagree</li>
+      <li>I did not run this against ArcadeDB.</li>
+    </ul></details>
+  </div>
+  <p>Caveman did not break the new format: titles and impact stayed plain in both new-format runs.</p>
+</section>
+
+<section id="decision">
+  <h2><span class="n">07</span>What we picked and why</h2>
+  <div class="compare">
+    <div class="box next">
+      <h3>Default: New skill + new format</h3>
+      <ul>
+        <li>The writing rules are ours and match the format; no "one line" rule pulls the other way</li>
+        <li>In the test it gave the most findings and the most suggestion boxes</li>
+        <li>It cost the most in the one run we measured ($1.99, against $1.49 and $1.20)</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Kept as choices</h3>
+      <ul>
+        <li><b>Caveman + new format:</b> the same readable layout for less output; pick it to save cost</li>
+        <li><b>Caveman + old format:</b> exactly how reviews were written before issue #6; pick it to compare, or if the new format causes trouble</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="switch">
+  <h2><span class="n">08</span>How to switch</h2>
+  <ul>
+    <li><b>Status page</b> (<a href="http://localhost:4777">localhost:4777</a>): the <b>Style</b> picker next to Model and Effort. It works like them: it applies from the next review on, a running review keeps its style, and the pick is saved in <code>data/state.db</code>, so it survives restarts.</li>
+    <li><b>Config default:</b> <code>"review": { "style": "readable" }</code> in <code>config.json</code>. A pick on the status page wins over it.</li>
+    <li><b>Caveman location:</b> <code>review.pluginPath</code> is now the caveman plugin folder; <code>null</code> finds the installed <code>caveman@caveman</code>. The new skill needs nothing installed.</li>
+    <li><b>Startup checks:</b> the default style must be usable or the server won't start. The other styles are checked too, but only warn. Without caveman installed, the two caveman styles fail if picked.</li>
+    <li><b>Mixing rounds works:</b> round one can use one style and round two another. Each finding is shown, and handed to Claude, in its own shape.</li>
+    <li>Each saved review records its style in <code>result.json</code>, and the status page shows it in the review detail.</li>
+  </ul>
+</section>
+
+<section id="code">
+  <h2><span class="n">09</span>Where it lives in the code</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>File</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/styles.ts</code></td><td>The three styles: label, skill, plugin, prompt files, structured or not</td></tr>
+      <tr><td><code>plugin/</code></td><td>The bundled <code>readable-review</code> skill</td></tr>
+      <tr><td><code>src/reviewer.ts</code></td><td>Structured <code>findingSchema</code> and the old <code>classicFindingSchema</code>; the runner picks one by style</td></tr>
+      <tr><td><code>src/finding-text.ts</code></td><td>How a finding reads: title, the labeled parts, the suggestion block, the folded reasoning; old <code>body</code> fallback</td></tr>
+      <tr><td><code>src/publish.ts</code></td><td>Builds inline comments and the review body; drops a suggestion when the comment can't cover its lines</td></tr>
+      <tr><td><code>src/runtime.ts</code>, <code>src/web/server.ts</code>, <code>src/web/page.ts</code></td><td>The Style pick: saved setting, <code>/api/review-settings</code>, <code>/api/status</code>, the picker</td></tr>
+      <tr><td><code>src/worker.ts</code></td><td>Reads the style when a review starts, picks the prompt and plugin, and saves the style in the run</td></tr>
+      <tr><td><code>src/preflight.ts</code></td><td>Checks each style at startup</td></tr>
+      <tr><td><code>src/followup.ts</code>, <code>src/report.ts</code></td><td>Round-two input (<code>previous.json</code>) and the local <code>review.md</code>, in both shapes</td></tr>
+      <tr><td><code>prompts/</code></td><td><code>review.md</code> / <code>follow-up.md</code> (new format), <code>*-classic.md</code> (old format)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="caveats">
+  <h2><span class="n">10</span>Caveats and open points</h2>
+  <ul>
+    <li><b>Read a suggestion before committing it.</b> In the test, one suggestion rewrote a whole long line from Claude's reading of the diff. If a character is wrong, "Commit suggestion" applies the wrong text. Short suggestions are low risk.</li>
+    <li><b>Cost numbers come from one run per style.</b> Re-measure with a few more runs before relying on the percentages.</li>
+    <li><b>GitHub's diff limit:</b> PR #1936 has more than 300 files since its merge, and GitHub refuses its diff, so it couldn't be re-run. This is unrelated to styles, but it limits which PRs can be reviewed.</li>
+    <li>The caveman plugin ships its own hooks. That's one reason a review loads only its own style's plugin: caveman never affects the default style.</li>
+  </ul>
+</section>
+</main>
+</div>

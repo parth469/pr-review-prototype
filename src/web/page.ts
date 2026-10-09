@@ -84,6 +84,9 @@ tbody tr.selected { background: var(--sunken); box-shadow: inset 3px 0 0 var(--a
 .finding .loc { font-family: var(--mono); font-size: 12.5px; margin-left: 6px; }
 .finding p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .finding .why { color: var(--muted); font-size: 13px; }
+.finding .ftitle { font-weight: 600; }
+.finding .sugg { margin: 6px 0 0; padding: 8px; background: var(--sunken); border-radius: 4px; font-family: var(--mono); font-size: 12.5px; overflow-x: auto; }
+.finding summary { margin-top: 6px; cursor: pointer; color: var(--muted); font-size: 13px; }
 .fid { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
 .round { margin-left: 6px; }
 .detail h3 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 4px; }
@@ -103,6 +106,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--sunken); b
     <div class="picks" id="picks" hidden>
       <label title="Model for the next review. A review already running keeps its model.">Model <select id="model"></select></label>
       <label title="Effort for the next review.">Effort <select id="effort"></select></label>
+      <label title="How findings are written in the next review. A review already running keeps its style.">Style <select id="style"></select></label>
     </div>
     <button id="pause" type="button" hidden></button>
   </header>
@@ -257,14 +261,16 @@ function renderPicks(st) {
   document.getElementById("picks").hidden = false;
   fillSelect("model", st.models, st.model);
   fillSelect("effort", st.efforts, st.effort);
+  (st.styles || []).forEach(function (s) { LABELS[s.key] = s.label; });
+  fillSelect("style", (st.styles || []).map(function (s) { return s.key; }), st.style);
 }
-["model", "effort"].forEach(function (id) {
+["model", "effort", "style"].forEach(function (id) {
   var sel = document.getElementById(id);
   sel.addEventListener("change", function () {
     var body = {}; body[id] = sel.value;
     sel.disabled = true;
     api("/api/review-settings", true, body)
-      .then(function (r) { toast("Next review: " + (LABELS[r.model] || r.model) + " · " + (LABELS[r.effort] || r.effort) + " effort"); })
+      .then(function (r) { toast("Next review: " + (LABELS[r.model] || r.model) + " · " + (LABELS[r.effort] || r.effort) + " effort · " + (LABELS[r.style] || r.style)); })
       .catch(function (err) { toast(err.message); })
       .finally(function () { sel.disabled = false; sel.blur(); refresh(); });
   });
@@ -312,9 +318,24 @@ var SEVERITY = { bug: ["🔴 bug", "change"], risk: ["🟡 risk", "work"], quest
 var ORDER = ["bug", "risk", "question", "nit"];
 var VERDICT = { fixed: ["fixed", "ok"], explained: ["explained", "comment"], no_longer_applies: ["no longer applies", "quiet"], partly_fixed: ["partly fixed", "work"], not_fixed: ["not fixed", "change"] };
 function where(f) { return f.path + ":" + f.line + (f.endLine && f.endLine !== f.line ? "-" + f.endLine : ""); }
+function labeled(label, text) {
+  var p = richText("p", text);
+  p.insertBefore(el("b", { text: label + ": " }), p.firstChild);
+  return p;
+}
 function findingRow(f) {
   var s = SEVERITY[f.severity] || [f.severity, "quiet"];
-  return el("div", { class: "finding" }, [f.id ? el("span", { class: "fid", text: f.id }) : null, el("span", { class: "chip " + s[1], text: s[0] }), el("span", { class: "loc", text: where(f) }), richText("p", f.body)]);
+  var kids = [f.id ? el("span", { class: "fid", text: f.id }) : null, el("span", { class: "chip " + s[1], text: s[0] }), el("span", { class: "loc", text: where(f) })];
+  // Findings saved before the readable parts existed have one free-text body.
+  if (!f.title) return el("div", { class: "finding" }, kids.concat([richText("p", f.body || "")]));
+  return el("div", { class: "finding" }, kids.concat([
+    el("p", { class: "ftitle", text: f.title }),
+    labeled("What's wrong", f.problem),
+    labeled("What happens if not fixed", f.impact),
+    labeled("Fix", f.fix),
+    f.suggestion ? el("pre", { class: "sugg", text: f.suggestion }) : null,
+    el("details", {}, [el("summary", { text: "Why I think so" }), richText("p", f.why, "why")]),
+  ]));
 }
 function renderDetail(data) {
   var job = data.job, run = data.review, d = describe(job);
@@ -324,6 +345,7 @@ function renderDetail(data) {
       el("span", {}, [el("span", { class: "chip " + d[1], text: d[0] })]),
       el("span", { class: "ref", text: job.head_sha.slice(0, 7) }),
       run ? el("span", { text: (run.durationMs / 60000).toFixed(1) + " min · $" + run.costUsd.toFixed(2) + " · " + run.numTurns + " turns" }) : null,
+      run && run.style ? el("span", { text: LABELS[run.style] || run.style }) : null,
       el("a", { href: job.url, target: "_blank", rel: "noopener", text: "PR ↗" }),
       job.review_url ? el("a", { href: job.review_url, target: "_blank", rel: "noopener", text: "Posted review ↗" }) : null
     ]),

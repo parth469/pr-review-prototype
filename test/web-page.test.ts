@@ -15,6 +15,10 @@ describe("status page", () => {
     expect(html).toContain('<style nonce="n0nce">');
   });
 
+  it("offers model, effort and style pickers", () => {
+    for (const id of ["model", "effort", "style"]) expect(html).toContain(`<select id="${id}">`);
+  });
+
   it("sends the token on every button call", () => {
     expect(html).toContain('headers: { "X-Proxy-Token": TOKEN }');
   });

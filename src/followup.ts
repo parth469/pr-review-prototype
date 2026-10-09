@@ -9,6 +9,7 @@ import {
   patchFiles,
   touchedFiles,
 } from "./diff.ts";
+import { isStructured } from "./finding-text.ts";
 import type { Logger } from "./log.ts";
 import { nextFindingNumber, numberFindings } from "./report.ts";
 import {
@@ -317,7 +318,9 @@ export async function prepareFollowUp(
     path: e.path,
     line: e.line,
     ...(e.endLine ? { endLine: e.endLine } : {}),
-    body: e.body,
+    ...(isStructured(e)
+      ? { title: e.title, problem: e.problem, impact: e.impact, fix: e.fix, why: e.why }
+      : { body: e.body }),
     raisedIn: { round: e.round, commit: short(e.sha) },
     ...(e.status === "open" ? {} : { lastVerdict: e.status }),
     thread: matched.has(e.id) ? (matched.get(e.id)?.isResolved ? "resolved" : "open") : "none",

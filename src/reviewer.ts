@@ -9,9 +9,10 @@ import {
   type SDKRateLimitInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import type { Config } from "./config.ts";
+import type { Config, Style } from "./config.ts";
 import type { FollowUpResult, LedgerEntry } from "./followup.ts";
 import type { SessionUsage } from "./runtime.ts";
+import { STYLE_SPECS } from "./styles.ts";
 
 export const findingSchema = z.object({
   path: z.string().min(1).describe("File path relative to the repository root"),
@@ -23,21 +24,62 @@ export const findingSchema = z.object({
     .describe(
       "true for every bug, and for a risk only when it is serious: security, data loss, a crash or broken behaviour in production. false for a minor risk, a nit or a question",
     ),
-  body: z.string().min(1).describe("The problem, why it matters, and the fix"),
+  title: z
+    .string()
+    .min(1)
+    .describe(
+      "Short headline in plain words someone new to this code understands, no code names. E.g. 'Stop button may not stop the request'",
+    ),
+  problem: z.string().min(1).describe("What's wrong, in one or two plain sentences, no code names"),
+  impact: z
+    .string()
+    .min(1)
+    .describe(
+      "What happens if this is not fixed: what a user sees or what breaks, in plain sentences. For a nit, say plainly that nothing breaks and why it still matters. For a question, what goes wrong if the answer is no",
+    ),
+  fix: z
+    .string()
+    .min(1)
+    .describe("How to fix it, with the exact file, function and variable names"),
+  suggestion: z
+    .string()
+    .optional()
+    .describe(
+      "Optional. The exact new code that replaces lines line..endLine (or line alone) of the new file, with the file's indentation, and nothing else. Give it only when the whole fix is inside those lines and applying it alone leaves the code working. Omit otherwise",
+    ),
+  why: z
+    .string()
+    .min(1)
+    .describe(
+      "Why you think so, as short markdown bullets: what you read or traced, with exact files, lines and names, so a person can check the claim",
+    ),
 });
 
-export const reviewSchema = z.object({
-  summary: z.string().min(1).describe("2-4 sentence overview of the PR and the main problems"),
-  verdict: z.enum(["request_changes", "no_issues"]),
-  findings: z.array(findingSchema),
-});
+type FindingText = "title" | "problem" | "impact" | "fix" | "suggestion" | "why";
 
-// mustFix is optional here: reviews saved before the grade existed do not have it.
-export type Finding = Omit<z.infer<typeof findingSchema>, "mustFix"> & {
-  mustFix?: boolean;
-  /** F1, F2... given after the run, stable across rounds so a follow-up can name each finding. */
-  id?: string;
-};
+/** The "caveman-classic" style: one free-text body per finding, as before issue #6. */
+export const classicFindingSchema = findingSchema
+  .pick({ path: true, line: true, endLine: true, severity: true, mustFix: true })
+  .extend({ body: z.string().min(1).describe("The problem, why it matters, and the fix") });
+
+const reviewShape = <F extends z.ZodType>(finding: F) =>
+  z.object({
+    summary: z.string().min(1).describe("2-4 sentence overview of the PR and the main problems"),
+    verdict: z.enum(["request_changes", "no_issues"]),
+    findings: z.array(finding),
+  });
+export const reviewSchema = reviewShape(findingSchema);
+export const classicReviewSchema = reviewShape(classicFindingSchema);
+
+// mustFix and the text parts are optional here: reviews saved before them have neither, and
+// keep their findings as one free-text `body`.
+export type Finding = Omit<z.infer<typeof findingSchema>, "mustFix" | FindingText> &
+  Partial<Pick<z.infer<typeof findingSchema>, FindingText>> & {
+    body?: string;
+    mustFix?: boolean;
+    /** F1, F2... given after the run, stable across rounds so a follow-up can name each finding. */
+    id?: string;
+  };
 /**
  * Whether a finding blocks approval from round two on. A bug always does; a risk only when
  * graded serious. Findings saved before the grade existed count as minor unless a bug.
@@ -57,32 +99,37 @@ export const VERDICTS = [
 export type Verdict = (typeof VERDICTS)[number];
 
 /** Round two: one verdict per earlier finding, plus new problems in the new commits. */
-export const followUpSchema = z.object({
-  summary: z
-    .string()
-    .min(1)
-    .describe("2-4 sentences: what changed since your last review and what is still open"),
-  previous: z.array(
-    z.object({
-      id: z.string().describe("The earlier finding's id from .review/previous.json, e.g. F3"),
-      verdict: z.enum(VERDICTS),
-      fixedAt: z
-        .array(z.object({ path: z.string().min(1), line: z.number().int().min(1) }))
-        .describe(
-          "For fixed and partly_fixed: new-file lines inside .review/since-last.patch that make the fix. Empty otherwise",
-        ),
-      evidence: z
-        .string()
-        .min(1)
-        .describe("Why this verdict: the change that fixes it, or the reply and why it holds"),
-      reply: z.string().min(1).describe("Short reply to the author for the finding's thread"),
-    }),
-  ),
-  findings: z
-    .array(findingSchema)
-    .describe("New problems, only on lines added or changed in .review/since-last.patch"),
-});
-export type FollowUpOutput = z.infer<typeof followUpSchema>;
+const followUpShape = <F extends z.ZodType>(finding: F) =>
+  z.object({
+    summary: z
+      .string()
+      .min(1)
+      .describe("2-4 sentences: what changed since your last review and what is still open"),
+    previous: z.array(
+      z.object({
+        id: z.string().describe("The earlier finding's id from .review/previous.json, e.g. F3"),
+        verdict: z.enum(VERDICTS),
+        fixedAt: z
+          .array(z.object({ path: z.string().min(1), line: z.number().int().min(1) }))
+          .describe(
+            "For fixed and partly_fixed: new-file lines inside .review/since-last.patch that make the fix. Empty otherwise",
+          ),
+        evidence: z
+          .string()
+          .min(1)
+          .describe("Why this verdict: the change that fixes it, or the reply and why it holds"),
+        reply: z.string().min(1).describe("Short reply to the author for the finding's thread"),
+      }),
+    ),
+    findings: z
+      .array(finding)
+      .describe("New problems, only on lines added or changed in .review/since-last.patch"),
+  });
+export const followUpSchema = followUpShape(findingSchema);
+export const classicFollowUpSchema = followUpShape(classicFindingSchema);
+export type FollowUpOutput = Omit<z.infer<typeof followUpSchema>, "findings"> & {
+  findings: Finding[];
+};
 
 // Claude Code validates --json-schema as draft-07 and rejects the 2020-12 $schema URL zod emits by default.
 function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -91,6 +138,8 @@ function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 export const reviewJsonSchema = toJsonSchema(reviewSchema);
 export const followUpJsonSchema = toJsonSchema(followUpSchema);
+const classicReviewJsonSchema = toJsonSchema(classicReviewSchema);
+const classicFollowUpJsonSchema = toJsonSchema(classicFollowUpSchema);
 
 // Claude may only look. Everything not allowed is denied by permissionMode "dontAsk";
 // the deny list is a second fence in case a tool gets allowed by accident.
@@ -141,6 +190,8 @@ export interface ReviewRun extends RunStats {
   followUp?: FollowUpResult;
   /** A full review that replaced a follow-up: earlier bugs and risks still open, checked next round. */
   carried?: LedgerEntry[];
+  /** How the findings were written. Missing on reviews saved before styles existed. */
+  style?: Style;
 }
 
 export type FollowUpRun = RunStats & { output: FollowUpOutput };
@@ -233,9 +284,10 @@ function createRunner<T>(
       for await (const message of run) {
         transcript.write(`${JSON.stringify(message)}\n`);
         if (message.type === "system" && message.subtype === "init") {
-          if (!message.skills.includes(input.settings.skill)) {
+          const { skill } = STYLE_SPECS[input.settings.style];
+          if (!message.skills.includes(skill)) {
             failure = new Error(
-              `Skill ${input.settings.skill} did not load. Loaded: ${message.skills.join(", ") || "none"}`,
+              `Skill ${skill} did not load. Loaded: ${message.skills.join(", ") || "none"}`,
             );
             controller.abort(failure);
             break;
@@ -279,14 +331,23 @@ function createRunner<T>(
 
 /** Run one review. `queryFn` is swappable so tests never start Claude. */
 export function createReviewer(queryFn: typeof query = query): RunReview {
-  const run = createRunner(queryFn, reviewSchema, reviewJsonSchema);
+  const readable = createRunner<Review>(queryFn, reviewSchema, reviewJsonSchema);
+  const classic = createRunner<Review>(queryFn, classicReviewSchema, classicReviewJsonSchema);
   return async (input) => {
+    const { style } = input.settings;
+    const run = STYLE_SPECS[style].structured ? readable : classic;
     const { output, ...stats } = await run(input);
-    return { review: output, ...stats };
+    return { review: output, ...stats, style };
   };
 }
 
 /** Run one follow-up review (round 2+), with the verdict schema. */
 export function createFollowUpReviewer(queryFn: typeof query = query): RunFollowUp {
-  return createRunner(queryFn, followUpSchema, followUpJsonSchema);
+  const readable = createRunner<FollowUpOutput>(queryFn, followUpSchema, followUpJsonSchema);
+  const classic = createRunner<FollowUpOutput>(
+    queryFn,
+    classicFollowUpSchema,
+    classicFollowUpJsonSchema,
+  );
+  return (input) => (STYLE_SPECS[input.settings.style].structured ? readable : classic)(input);
 }

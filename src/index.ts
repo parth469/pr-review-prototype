@@ -12,6 +12,7 @@ import { approveByHand, createPublisher } from "./publisher.ts";
 import { createFollowUpReviewer, createReviewer, resolvePluginPath } from "./reviewer.ts";
 import { createRuntime, isPostingPaused, recordPoll } from "./runtime.ts";
 import { openState } from "./state.ts";
+import { BUNDLED_PLUGIN, type PluginId } from "./styles.ts";
 import { EXIT_PREFLIGHT } from "./supervisor.ts";
 import { startStatusServer } from "./web/server.ts";
 import { createWorker } from "./worker.ts";
@@ -47,12 +48,14 @@ const stop = (signal: string) => {
 process.once("SIGINT", () => stop("SIGINT"));
 process.once("SIGTERM", () => stop("SIGTERM"));
 
-let pluginPath: Promise<string> | undefined;
-const getPluginPath = () => {
-  pluginPath ??= config.review.pluginPath
+// The bundled skill ships with this repo; the caveman plugin is looked up once, when first needed.
+let cavemanPath: Promise<string> | undefined;
+const getPluginPath = (plugin: PluginId) => {
+  if (plugin === "bundled") return Promise.resolve(BUNDLED_PLUGIN);
+  cavemanPath ??= config.review.pluginPath
     ? Promise.resolve(config.review.pluginPath)
     : resolvePluginPath("caveman@caveman");
-  return pluginPath;
+  return cavemanPath;
 };
 
 let releaseLock: (() => void) | undefined;
