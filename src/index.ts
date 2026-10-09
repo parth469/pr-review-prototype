@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { loadConfig } from "./config.ts";
 import { git } from "./git.ts";
 import { createGitHub, type GitHub, getGhToken, parsePrRef } from "./github.ts";
+import { createWakeWatch } from "./hold.ts";
 import { acquireLock } from "./lock.ts";
 import { createLogger } from "./log.ts";
 import { createNotifier, notificationFor } from "./notify.ts";
@@ -82,6 +83,15 @@ try {
   releaseLock = acquireLock(join(config.dataDir, "server.lock"));
 
   const state = openState(join(config.dataDir, "state.db"));
+  const wakeWatch = createWakeWatch();
+  const statusUrl = config.statusPage.enabled
+    ? `http://localhost:${config.statusPage.port}`
+    : undefined;
+  const notifyWanted = {
+    posted: config.notify.onPosted,
+    held: config.notify.onHeld,
+    failed: config.notify.onFailed,
+  };
   const worker = createWorker({
     state,
     workspace: createWorkspace({
@@ -99,9 +109,9 @@ try {
     isPostingPaused: () => isPostingPaused(state),
     followUp: { source: github, run: createFollowUpReviewer(), viewer },
     findPendingReview: (job) => (github as GitHub).findPendingReview(job.repo, job.pr, viewer),
+    wakeWatch,
     onEvent: (event) => {
-      const wanted = event.type === "posted" ? config.notify.onPosted : config.notify.onFailed;
-      if (wanted) void notifier.notify(notificationFor(event));
+      if (notifyWanted[event.type]) void notifier.notify(notificationFor(event, { statusUrl }));
     },
   });
   const runtime = createRuntime(viewer);
@@ -175,6 +185,7 @@ try {
     ]);
     await page?.close();
   }
+  wakeWatch.stop();
   state.close();
 } catch (err) {
   // Setup problems (not logged in, already running...) get the supervisor's slow retry.

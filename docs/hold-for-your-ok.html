@@ -1,0 +1,325 @@
+<title>Hold for Your OK</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root{
+  --ground:#F3F5F7;--surface:#FFFFFF;--sunken:#E8ECF0;
+  --ink:#16202B;--ink-2:#4A5866;--ink-3:#7A8794;--rule:#D5DCE3;
+  --accent:#1F5F8B;--accent-soft:#DCE9F3;
+  --change:#B8401E;--change-soft:#F8E3DA;
+  --ok:#2F7A4A;--ok-soft:#DDEFE3;
+  --warn:#9A6B00;--warn-soft:#F6ECD2;
+  --code-bg:#0F1720;--code-ink:#D8E1EA;--code-dim:#7F90A0;--code-key:#8CC4F0;--code-str:#E7B98A;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --cond:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0E141A;--surface:#151D25;--sunken:#1C2630;
+    --ink:#E4EAF0;--ink-2:#A9B6C2;--ink-3:#76858F;--rule:#2A3642;
+    --accent:#72AEDB;--accent-soft:#1A3043;
+    --change:#F08A62;--change-soft:#3A1F16;
+    --ok:#6CC08A;--ok-soft:#16301F;
+    --warn:#E0B24A;--warn-soft:#352A10;
+    --code-bg:#0A0F14;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0E141A;--surface:#151D25;--sunken:#1C2630;
+  --ink:#E4EAF0;--ink-2:#A9B6C2;--ink-3:#76858F;--rule:#2A3642;
+  --accent:#72AEDB;--accent-soft:#1A3043;
+  --change:#F08A62;--change-soft:#3A1F16;
+  --ok:#6CC08A;--ok-soft:#16301F;
+  --warn:#E0B24A;--warn-soft:#352A10;
+  --code-bg:#0A0F14;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;padding-inline:16px;padding-block:0 64px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shell{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px}
+@media (max-width:880px){.shell{grid-template-columns:minmax(0,1fr);gap:0}.toc{display:none}}
+.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 32px);align-self:start;padding-top:40px;font-size:14px}
+.toc p{font-family:var(--cond);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--ink-3);margin:0 0 12px}
+.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;counter-reset:t}
+.toc li{counter-increment:t}
+.toc a{color:var(--ink-2);text-decoration:none;display:flex;gap:10px}
+.toc a::before{content:counter(t,decimal-leading-zero);font-family:var(--mono);font-size:12px;color:var(--ink-3);padding-top:2px}
+.toc a:hover{color:var(--accent)}
+main{min-width:0}
+header.top{padding-block:40px 32px;border-bottom:1px solid var(--rule)}
+.eyebrow{font-family:var(--mono);font-size:13px;color:var(--ink-3);margin:0 0 12px}
+h1{font-family:var(--cond);font-weight:700;font-size:clamp(34px,5vw,48px);line-height:1.08;margin:0 0 16px;letter-spacing:-.01em;text-wrap:balance}
+.lede{font-size:18px;color:var(--ink-2);max-width:64ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font-family:var(--mono);font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--sunken);color:var(--ink-2);border:1px solid var(--rule)}
+.chip.change{background:var(--change-soft);color:var(--change);border-color:transparent}
+.chip.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.chip.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+section{padding-block:40px 8px}
+h2{font-family:var(--cond);font-weight:600;font-size:28px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-weight:400;font-size:15px;color:var(--ink-3);margin-right:10px;vertical-align:3px}
+h3{font-family:var(--cond);font-weight:600;font-size:19px;margin:28px 0 8px}
+p,li{max-width:68ch}
+.sub{color:var(--ink-2);margin:0 0 20px}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunken);padding:1px 5px;border-radius:4px}
+pre.code{background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:13.5px;line-height:1.55;padding:18px 20px;border-radius:8px;overflow-x:auto;margin:12px 0 20px}
+pre.code .c{color:var(--code-dim)}
+pre.code .k{color:var(--code-key)}
+pre.code .s{color:var(--code-str)}
+.diagram{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:20px;overflow-x:auto;margin:16px 0 8px}
+.diagram pre.mermaid{margin:0;background:transparent;text-align:center}
+.cap{font-size:13.5px;color:var(--ink-3);margin:0 0 16px}
+.tablewrap{overflow-x:auto;margin:12px 0 20px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:600px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--cond);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);background:var(--sunken)}
+tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+.v{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:500;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.v.fixed{background:var(--ok-soft);color:var(--ok)}
+.v.explained{background:var(--accent-soft);color:var(--accent)}
+.v.partial{background:var(--warn-soft);color:var(--warn)}
+.v.open{background:var(--change-soft);color:var(--change)}
+.v.gone{background:var(--sunken);color:var(--ink-2)}
+.block{font-family:var(--mono);font-size:12px}
+.block.yes{color:var(--change)}
+.block.no{color:var(--ok)}
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:16px 0}
+.box{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:16px 18px}
+.box h3{margin-top:0}
+.box ul{margin:0;padding-left:18px;font-size:15px}
+.box li{margin:4px 0}
+.box.now{border-top:3px solid var(--ink-3)}
+.box.next{border-top:3px solid var(--ok)}
+.gh{background:var(--surface);border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin:16px 0 8px}
+.gh-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule);background:var(--sunken);flex-wrap:wrap}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--surface);display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:500;flex:none}
+.avatar.author{background:var(--ink-3)}
+.who{font-weight:600}
+.what{color:var(--ink-2)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:2px 10px;border-radius:999px}
+.badge::before{content:"";width:8px;height:8px;border-radius:50%}
+.badge.ok{background:var(--ok-soft);color:var(--ok)}
+.badge.ok::before{background:var(--ok)}
+.gh-body{padding:16px 18px;font-size:14.5px}
+.gh-body h4{margin:0 0 8px;font-size:15px}
+.gh-body table{min-width:0;font-size:13.5px;margin:8px 0 4px}
+.gh-body td,.gh-body th{padding:6px 10px}
+.thread{border-top:1px solid var(--rule)}
+.thread .path{font-family:var(--mono);font-size:12.5px;padding:8px 16px;background:var(--sunken);color:var(--ink-2);border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.resolved{font-family:var(--sans);font-size:12px;color:var(--ok);font-weight:600}
+.comment{padding:10px 16px;display:flex;gap:10px;font-size:14px;border-top:1px solid var(--rule)}
+.comment:first-of-type{border-top:0}
+.comment p{margin:0}
+.comment .muted{color:var(--ink-3)}
+.callout{border:1px solid var(--rule);border-left:3px solid var(--warn);background:var(--surface);padding:14px 18px;border-radius:0 8px 8px 0;margin:16px 0;font-size:15px}
+.callout.risk{border-left-color:var(--change)}
+.callout b{font-family:var(--cond);font-weight:600}
+.ms{display:flex;flex-direction:column;margin:16px 0;border-left:2px solid var(--rule)}
+.m{position:relative;padding:0 0 22px 24px}
+.m::before{content:"";position:absolute;left:-7px;top:6px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--accent)}
+.m .t{font-family:var(--cond);font-weight:600;font-size:18px}
+.m .t small{font-family:var(--mono);font-weight:400;font-size:12.5px;color:var(--ink-3);margin-left:8px}
+.m p{margin:4px 0 0;color:var(--ink-2);font-size:15px}
+.m .done{font-size:13.5px;color:var(--ink-3);margin-top:4px}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#problem">The problem</a></li>
+    <li><a href="#request">What was asked for</a></li>
+    <li><a href="#flow">How it works</a></li>
+    <li><a href="#decisions">Decisions and why</a></li>
+    <li><a href="#scenarios">Scenarios</a></li>
+    <li><a href="#settings">Settings and buttons</a></li>
+    <li><a href="#inside">Inside the code</a></li>
+    <li><a href="#step2">Step 2: not built yet</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">reivew-prototype / design · issue #5 · step 1 · 2026-10-09</p>
+  <h1>Request changes waits for your OK</h1>
+  <p class="lede">When the AI wants to request changes, the review waits on the status page instead of going to GitHub. You can post it, drop findings you disagree with, stop the timer or discard it. If you do nothing, it posts by itself after 30 minutes.</p>
+  <div class="meta">
+    <span class="chip accent">step 1: built</span>
+    <span class="chip">step 2: written up, not built</span>
+    <span class="chip change">only REQUEST_CHANGES waits</span>
+    <span class="chip ok">APPROVE and COMMENT post at once</span>
+  </div>
+</header>
+
+<section id="problem">
+  <h2><span class="n">01</span>The problem</h2>
+  <p class="sub">Request changes blocks someone's PR, emails them, and goes out under your name.</p>
+  <div class="compare">
+    <div class="box now">
+      <h3>Before</h3>
+      <ul>
+        <li>One 🔴 bug or 🟡 risk found by the AI: <b>Request changes</b> posted at once</li>
+        <li>The author is blocked and emailed before you have looked</li>
+        <li>A wrong or silly finding goes out as yours</li>
+        <li>Approvals already had a safety step (a draft for your OK); Request changes had none</li>
+      </ul>
+    </div>
+    <div class="box next">
+      <h3>Now</h3>
+      <ul>
+        <li>The review waits on the status page as <b>Needs your OK</b>, and you get a notification</li>
+        <li>You post it, drop findings, take your time, or discard it</li>
+        <li>Busy? It posts by itself after the wait (30 min by default)</li>
+        <li>Approvals and comments are unchanged</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="request">
+  <h2><span class="n">02</span>What was asked for</h2>
+  <p class="sub">Three needs, settled in the discussion of issue #5.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Need</th><th>How step 1 covers it</th></tr></thead>
+    <tbody>
+      <tr><td>Approve the whole review myself</td><td><b>Post</b> sends it now, as written (minus anything you dropped)</td></tr>
+      <tr><td>Go through it finding by finding</td><td><b>Drop / Keep</b> on each new finding; untouched ones post as written</td></tr>
+      <tr><td>Post automatically when I'm busy</td><td>The wait timer posts it as it is; <b>I'll handle it</b> turns the timer off for one review</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="flow">
+  <h2><span class="n">03</span>How it works</h2>
+  <p class="sub">Job states, with the new one in the middle. Nothing reaches GitHub while a job is <code>held</code>.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>From</th><th>What happens</th><th>To</th></tr></thead>
+    <tbody>
+      <tr><td><code>posting</code></td><td>The event is not REQUEST_CHANGES: it posts as before</td><td><code>done</code></td></tr>
+      <tr><td><code>posting</code></td><td>Would request changes, the wait is on, not started by hand: posts nothing, notifies you</td><td><code>held</code>, timer set</td></tr>
+      <tr><td><code>held</code></td><td>You press <b>Post</b></td><td><code>reviewed</code>, then posts at once</td></tr>
+      <tr><td><code>held</code></td><td>The timer runs out (and posting is not paused)</td><td><code>posting</code>, posts as it is</td></tr>
+      <tr><td><code>held</code></td><td>The timer ran out while the PC slept or the server was off</td><td><code>held</code> again, fresh timer, new notification</td></tr>
+      <tr><td><code>held</code></td><td>You press <b>I'll handle it</b></td><td><code>held</code>, no timer</td></tr>
+      <tr><td><code>held</code></td><td>You press <b>Discard</b></td><td><code>skipped</code>, "discarded by you"</td></tr>
+      <tr><td><code>held</code></td><td>The author pushes a new commit</td><td><code>skipped</code>, "superseded" (quietly)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="cap">A released review (by you or by the timer) is never held again. Before it posts, the usual checks still run: PR merged or closed, newer commit, review no longer requested. Any of these means nothing is posted, as before.</p>
+</section>
+
+<section id="decisions">
+  <h2><span class="n">04</span>Decisions and why</h2>
+  <p class="sub">Settled one by one with the user before building. Q-numbers match the discussion.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>#</th><th>Question</th><th>Decision</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Q1</td><td>Which reviews wait?</td><td>Only ones that would <b>Request changes</b></td><td>That is the one that blocks someone. Approvals already have <code>followUp.approve: pending</code></td></tr>
+      <tr><td>Q2</td><td>Where do you decide?</td><td>On the status page; nothing on GitHub meanwhile</td><td>A GitHub draft can't do one-by-one, a timer or "I'll handle it" cleanly, and GitHub allows only one draft per PR</td></tr>
+      <tr><td>Q3</td><td>Where is the wait set?</td><td><code>publish.holdMin</code> as the default, plus a picker on the page</td><td>Same pattern as Model, Effort and Style</td></tr>
+      <tr><td>Q4</td><td>Timer ran out while the PC slept?</td><td>Fresh full wait and a new notification</td><td>You get a real chance to look before it goes out the next morning</td></tr>
+      <tr><td>Q5</td><td>What are you told?</td><td>When it starts waiting, and when the timer posts it</td><td>You hear when you are needed and when the bot acted without you. A reminder before posting is noise</td></tr>
+      <tr><td>Q6</td><td><code>npm run review</code> by hand?</td><td>Posts at once</td><td>Running it by hand already means "post this now"</td></tr>
+      <tr><td>Q7</td><td>Choices per finding?</td><td>Step 1: <b>Keep</b> / <b>Drop</b>. Make optional is step 2. No editing</td><td>Editing needs an editor and format checks: a lot of work. Drop it, then comment by hand</td></tr>
+      <tr><td>Q8</td><td>Which findings get choices?</td><td>Every new finding, nits too</td><td>Same buttons everywhere; lets you drop a silly nit</td></tr>
+      <tr><td>Q9</td><td>Timer runs out after some choices</td><td>Posts with your choices so far; untouched findings post as written</td><td>Choices are saved on click, so nothing you did is lost</td></tr>
+      <tr><td>Q10</td><td>No blocking finding left after drops</td><td><b>Approve</b>, the rest as comments</td><td>The rule used everywhere: nits never block</td></tr>
+      <tr><td>Q11</td><td>Earlier findings in a follow-up</td><td>Step 1: no buttons</td><td>They are already on GitHub, so they can't be dropped. Accepting one is step 2</td></tr>
+      <tr><td>Q12</td><td>Discard, and turning the wait off</td><td>Discard per review; <b>Off</b> in the picker</td><td>Discard covers a plain wrong review. Off is the old behaviour</td></tr>
+      <tr><td>Q13</td><td>One wait for all, or per review?</td><td>One picker in the header</td><td>Post and I'll handle it already cover the per-review cases</td></tr>
+      <tr><td>Q14</td><td>Wait changed while reviews wait</td><td>Only new waits use it</td><td>Otherwise switching to Off could post five reviews you were halfway through</td></tr>
+      <tr><td>Q15</td><td>What does the author see?</td><td>Only what is posted. A dropped finding leaves no trace</td><td>The author only needs to know what to fix</td></tr>
+      <tr><td>Q16</td><td>Timer runs out while posting is paused</td><td>Waits for Resume, then posts with your choices</td><td>Pause means nothing leaves until you say so</td></tr>
+      <tr><td>Q17</td><td>PR moves on while waiting</td><td>A new push replaces it quietly. Merged or closed: checked only at post time</td><td>Same as before; no extra polling</td></tr>
+      <tr><td>Scope</td><td>Too many moving parts?</td><td>Build step 1; write step 2 down</td><td>Make optional touches the approve-or-block rule and what later rounds remember: the riskiest code. Drop covers most of it</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="scenarios">
+  <h2><span class="n">05</span>Scenarios</h2>
+  <p class="sub">What happens, step by step. Numbers match the discussion; 12 and 13 need step 2.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>#</th><th>Situation</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>AI finds nothing</td><td>Approve posts at once</td></tr>
+      <tr><td>2</td><td>Only nits or questions</td><td>Approve posts at once, nits as comments</td></tr>
+      <tr><td>3</td><td>Your own PR</td><td>Comment posts at once (GitHub allows nothing else)</td></tr>
+      <tr><td>4</td><td><code>npm run review</code></td><td>Request changes posts at once</td></tr>
+      <tr><td>5</td><td>Wait set to Off</td><td>Everything posts at once, as before</td></tr>
+      <tr><td>6</td><td>You do nothing</td><td>10:00 it waits: "Needs your OK". 10:30 it posts as written: "Requested changes after the wait"</td></tr>
+      <tr><td>7</td><td>You agree</td><td>Post: Request changes goes out now</td></tr>
+      <tr><td>8</td><td>You need more time</td><td>I'll handle it: no timer; later Post or Discard</td></tr>
+      <tr><td>9</td><td>The review is wrong</td><td>Discard: nothing posted. The next push is reviewed again (round 1 if nothing was ever posted on the PR)</td></tr>
+      <tr><td>10</td><td>Drop one of two bugs</td><td>Request changes with the other bug and the nits; the author never sees the dropped one</td></tr>
+      <tr><td>11</td><td>Drop every bug and risk</td><td>Approve, nits as comments</td></tr>
+      <tr><td>14</td><td>Drop one, then get pulled away</td><td>At the timer: posts without the dropped one, the rest as written</td></tr>
+      <tr><td>15</td><td>Follow-up, all fixed</td><td>Approve at once, as before</td></tr>
+      <tr><td>16</td><td>Follow-up, an earlier bug not fixed</td><td>Waits. Do nothing: Request changes after the wait. To accept it anyway: Discard, then the Approve button (step 2 makes this one click)</td></tr>
+      <tr><td>17</td><td>Follow-up, a new bug</td><td>Waits; the new finding can be dropped like any other</td></tr>
+      <tr><td>18</td><td>Wait changed while one waits</td><td>The waiting one keeps its time</td></tr>
+      <tr><td>19</td><td>Laptop shut overnight</td><td>On wake: a fresh wait and a new notification</td></tr>
+      <tr><td>20</td><td>Posting paused</td><td>Waits past its time; posts on Resume</td></tr>
+      <tr><td>21</td><td>Author pushes again</td><td>The old one is dropped quietly; the new commit is reviewed</td></tr>
+      <tr><td>22</td><td>Merged, closed, or you reviewed by hand</td><td>Nothing posted when it would go out; shown as skipped with the reason</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="settings">
+  <h2><span class="n">06</span>Settings and buttons</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Setting</th><th>Default</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>publish.holdMin</code></td><td><code>30</code></td><td>Minutes a review that would request changes waits. <code>0</code> = post at once. The page's <b>Wait for OK</b> picker (Off, 15, 30 min, 1 h, 2 h) overrides it and survives restarts</td></tr>
+      <tr><td><code>notify.onHeld</code></td><td><code>true</code></td><td>Notify when a review starts waiting. Clicking opens it on the status page</td></tr>
+    </tbody>
+  </table></div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Button</th><th>Shown for</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><b>Post</b></td><td>Needs your OK</td><td>Posts now, without the findings you dropped</td></tr>
+      <tr><td><b>I'll handle it</b></td><td>Needs your OK, timer running</td><td>Stops the timer; it waits until you press Post or Discard</td></tr>
+      <tr><td><b>Discard</b></td><td>Needs your OK</td><td>Posts nothing for this commit</td></tr>
+      <tr><td><b>Drop / Keep</b></td><td>Each new finding of a waiting review</td><td>Saved at once; the timer uses your choices</td></tr>
+      <tr><td><b>Re-review</b></td><td>also Needs your OK</td><td>Runs Claude again; the wait and the drops are forgotten</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="inside">
+  <h2><span class="n">07</span>Inside the code</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Where</th><th>What</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/state.ts</code></td><td>Status <code>held</code>; columns <code>hold_until</code>, <code>released</code> (<code>you</code> or <code>timer</code>) and <code>dropped</code>; <code>hold</code>, <code>release</code>, <code>holdForYou</code>, <code>discard</code>, <code>setDropped</code>. Claiming a held job whose time is up marks it released by the timer. Paused posting leaves held jobs alone</td></tr>
+      <tr><td><code>src/publisher.ts</code></td><td>With <code>hold</code> set, a review whose event is REQUEST_CHANGES returns <code>{kind: "hold"}</code> after the duplicate and still-relevant checks, so a closed PR never pings you. Not in pending or dry-run mode, never for a forced post, never for a follow-up already left as a draft for you</td></tr>
+      <tr><td><code>src/worker.ts</code></td><td>Asks to hold unless the job was released or started by hand. Applies your drops before posting: the AI's original stays in <code>result.ai.json</code>; <code>result.json</code> and <code>review.md</code> become what was posted, so later rounds never see dropped findings</td></tr>
+      <tr><td><code>src/hold.ts</code></td><td><code>dropFindings</code> (also from a follow-up's ledger) and the wake watch: a 30 s tick; a gap over 3 min means the PC slept, so a timer that ran out before the wake was missed</td></tr>
+      <tr><td><code>src/web/*</code>, <code>src/notify.ts</code></td><td>Buttons, Drop/Keep, the picker, <code>#job-&lt;id&gt;</code> links; "Needs your OK" and "after the wait" notifications</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="step2">
+  <h2><span class="n">08</span>Step 2: not built yet</h2>
+  <p class="sub">A third choice per finding, <b>Make optional</b>: the author still sees the problem, but it doesn't block the PR, and later rounds never ask about it again. It also works on earlier findings that weren't fixed, so you can let a known issue go with one click instead of Discard plus Approve.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Gap in step 1</th><th>Workaround today</th><th>With step 2</th></tr></thead>
+    <tbody>
+      <tr><td>"Real bug, but don't block" (scenarios 12, 13)</td><td>Drop it and write a comment yourself, or approve by hand on GitHub</td><td>Posted with a "🔴 bug · non-blocking" label; Approve if nothing else blocks</td></tr>
+      <tr><td>Follow-up: accept an unfixed earlier bug (16)</td><td>Discard, then the Approve button: two clicks, and no "not fixed" reply is posted</td><td>Make optional: one click posts Approve, and the table says "not fixed (non-blocking)"</td></tr>
+      <tr><td>A bug you let go is checked again next round</td><td>Discard and Approve again if the author pushes once more</td><td>An optional finding is settled: never checked or raised again</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout"><b>Why it waits.</b> Make optional adds a third kind of finding, "posted but not blocking". That changes the approve-or-block rule (<code>mustFix</code>, <code>chooseEvent</code>, <code>decideFollowUp</code>), the text posted on GitHub, and what later rounds remember in the ledger. Build it only if step 1's workarounds turn out to be a nuisance.</div>
+  <p class="cap">Sketch: an <code>optional</code> flag on a finding, set from the page. <code>mustFix</code> and the round-one blocking rule ignore optional findings; the label adds "· non-blocking"; the ledger carries the flag so <code>needsCheck</code> treats it as settled. Earlier open must-fix findings in a follow-up get Keep / Make optional (no Drop: they are on GitHub already).</p>
+</section>
+</main>
+</div>

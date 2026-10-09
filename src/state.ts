@@ -8,6 +8,8 @@ export type JobStatus =
   | "preparing"
   | "reviewing"
   | "reviewed"
+  /** Would request changes: waits on the status page for your OK, or until hold_until. */
+  | "held"
   | "posting"
   | "done"
   | "failed"
@@ -38,6 +40,12 @@ export interface Job {
   parent_job_id: number | null;
   /** When posting started waiting for CI, so the wait has an end. */
   waiting_since: string | null;
+  /** A held review posts by itself at this time. null while held: it waits for you. */
+  hold_until: string | null;
+  /** Let go by you or by the timer, so it is not held again. */
+  released: "you" | "timer" | null;
+  /** JSON array of F-ids you dropped while it was held; they are never posted. */
+  dropped: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -95,6 +103,9 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE jobs ADD COLUMN round INTEGER NOT NULL DEFAULT 1;
    ALTER TABLE jobs ADD COLUMN parent_job_id INTEGER;
    ALTER TABLE jobs ADD COLUMN waiting_since TEXT;`,
+  `ALTER TABLE jobs ADD COLUMN hold_until TEXT;
+   ALTER TABLE jobs ADD COLUMN released TEXT;
+   ALTER TABLE jobs ADD COLUMN dropped TEXT;`,
 ];
 
 export interface PublishOutcome {
@@ -124,6 +135,10 @@ function migrate(db: DatabaseSync): void {
 export const STOPPED_REASON = "stopped by you";
 /** Reason saved on a follow-up you approved by hand from the status page. */
 export const APPROVED_BY_YOU = "approved by you";
+/** Reason on a held review, waiting for your OK. */
+export const HELD_REASON = "needs your OK";
+/** Skip reason for a held review you discarded. */
+export const DISCARDED_REASON = "discarded by you";
 
 export interface State {
   recordSeen(input: SeenInput): SeenResult;
@@ -134,6 +149,19 @@ export interface State {
    * reviewed -> posting (review done, needs publishing). The returned status says which.
    */
   claimNext(now?: Date, options?: { skipPosting?: boolean }): Job | undefined;
+  /**
+   * Hold a review that would request changes until `until`, or until you act (null).
+   * It no longer counts as released.
+   */
+  hold(id: number, until: Date | null, now?: Date): void;
+  /** Post a held review now (with your drops): held -> reviewed. Undefined if not held. */
+  release(id: number): Job | undefined;
+  /** Stop the timer of a held review: it waits for you. Undefined if not held with a timer. */
+  holdForYou(id: number): Job | undefined;
+  /** Post nothing for a held review. Undefined if not held. */
+  discard(id: number): Job | undefined;
+  /** The F-ids you dropped from a held review, replacing the earlier list. */
+  setDropped(id: number, ids: string[]): Job | undefined;
   /** Claim one specific queued or reviewed job, ignoring its retry time. */
   claimById(id: number): Job | undefined;
   setStatus(id: number, status: JobStatus): void;
@@ -203,20 +231,24 @@ export function openState(path: string): State {
   );
   const supersede = db.prepare(
     `UPDATE jobs SET status = 'skipped', reason = 'superseded', updated_at = ?
-     WHERE repo = ? AND pr = ? AND head_sha <> ? AND status = 'queued'`,
+     WHERE repo = ? AND pr = ? AND head_sha <> ? AND status IN ('queued', 'held')`,
   );
   const requeueManual = db.prepare(
     `UPDATE jobs SET status = 'queued', reason = NULL, error = NULL, attempts = 0,
-       next_attempt_at = NULL, waiting_since = NULL, title = ?, updated_at = ?
+       next_attempt_at = NULL, waiting_since = NULL, hold_until = NULL, released = NULL,
+       dropped = NULL, title = ?, updated_at = ?
      WHERE id = ?`,
   );
-  const nextStep = `status = CASE status WHEN 'queued' THEN 'preparing' ELSE 'posting' END`;
+  // A held review whose timer ran out is posted, and marks itself released by the timer.
+  const nextStep = `status = CASE status WHEN 'queued' THEN 'preparing' ELSE 'posting' END,
+    released = CASE status WHEN 'held' THEN 'timer' ELSE released END`;
   const claim = db.prepare(
     `UPDATE jobs SET ${nextStep}, started_at = ?, updated_at = ?
      WHERE id = (
        SELECT id FROM jobs
-       WHERE status IN ('queued', 'reviewed')
-         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+       WHERE (status IN ('queued', 'reviewed')
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+         OR (status = 'held' AND hold_until IS NOT NULL AND hold_until <= ?)
        ORDER BY id LIMIT 1
      )
      RETURNING *`,
@@ -232,9 +264,34 @@ export function openState(path: string): State {
      RETURNING *`,
   );
   const reset = db.prepare(
-    `UPDATE jobs SET status = ?, reason = NULL, error = NULL, attempts = 0,
-       next_attempt_at = NULL, waiting_since = NULL, updated_at = ?
+    `UPDATE jobs SET status = ?1, reason = NULL, error = NULL, attempts = 0,
+       next_attempt_at = NULL, waiting_since = NULL, hold_until = NULL,
+       -- A post retried as reviewed keeps your OK and drops; a new review starts over.
+       released = CASE ?1 WHEN 'queued' THEN NULL ELSE released END,
+       dropped = CASE ?1 WHEN 'queued' THEN NULL ELSE dropped END,
+       updated_at = ?2
+     WHERE id = ?3`,
+  );
+  const holdStmt = db.prepare(
+    `UPDATE jobs SET status = 'held', reason = ?, hold_until = ?, released = NULL,
+       next_attempt_at = NULL, error = NULL, updated_at = ?
      WHERE id = ?`,
+  );
+  const releaseStmt = db.prepare(
+    `UPDATE jobs SET status = 'reviewed', reason = NULL, released = 'you', next_attempt_at = NULL,
+       updated_at = ?
+     WHERE id = ? AND status = 'held'`,
+  );
+  const holdForYouStmt = db.prepare(
+    `UPDATE jobs SET hold_until = NULL, updated_at = ?
+     WHERE id = ? AND status = 'held' AND hold_until IS NOT NULL`,
+  );
+  const discardStmt = db.prepare(
+    `UPDATE jobs SET status = 'skipped', reason = ?, hold_until = NULL, updated_at = ?
+     WHERE id = ? AND status = 'held'`,
+  );
+  const setDroppedStmt = db.prepare(
+    "UPDATE jobs SET dropped = ?, updated_at = ? WHERE id = ? AND status = 'held'",
   );
   const selectRecent = db.prepare("SELECT * FROM jobs ORDER BY updated_at DESC, id DESC LIMIT ?");
   const readSetting = db.prepare("SELECT value FROM settings WHERE key = ?");
@@ -368,12 +425,35 @@ export function openState(path: string): State {
 
     claimNext(now = new Date(), { skipPosting = false } = {}) {
       const t = iso(now);
-      return toJob((skipPosting ? claimReviewOnly : claim).get(t, t, t));
+      return toJob(skipPosting ? claimReviewOnly.get(t, t, t) : claim.get(t, t, t, t));
     },
 
     claimById(id) {
       const t = iso();
       return toJob(claimOne.get(t, t, id));
+    },
+
+    hold(id, until, now = new Date()) {
+      holdStmt.run(HELD_REASON, until ? iso(until) : null, iso(now), id);
+    },
+
+    release(id) {
+      return releaseStmt.run(iso(), id).changes ? toJob(getJob.get(id)) : undefined;
+    },
+
+    holdForYou(id) {
+      return holdForYouStmt.run(iso(), id).changes ? toJob(getJob.get(id)) : undefined;
+    },
+
+    discard(id) {
+      return discardStmt.run(DISCARDED_REASON, iso(), id).changes
+        ? toJob(getJob.get(id))
+        : undefined;
+    },
+
+    setDropped(id, ids) {
+      const value = ids.length > 0 ? JSON.stringify(ids) : null;
+      return setDroppedStmt.run(value, iso(), id).changes ? toJob(getJob.get(id)) : undefined;
     },
 
     setStatus(id, status) {

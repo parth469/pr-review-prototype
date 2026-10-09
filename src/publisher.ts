@@ -35,6 +35,8 @@ export type PublishResult =
   | { kind: "existing"; review: PostedReview }
   | { kind: "dry-run"; draft: ReviewDraft | FollowUpDraft }
   | { kind: "skipped"; reason: string }
+  /** It would request changes and may wait for your OK: nothing was posted. */
+  | { kind: "hold"; event: "REQUEST_CHANGES" }
   /**
    * Not ready yet (a pending review of yours in the way). Try again at retryAt without using
    * an attempt. `ci: false`: not a CI wait, so the CI wait clock does not start.
@@ -44,6 +46,8 @@ export type PublishResult =
 export interface PublishOptions {
   /** Post even if you are no longer a requested reviewer (manual --review). */
   force?: boolean;
+  /** Don't post a review that would request changes; return `hold` instead. */
+  hold?: boolean;
 }
 
 export interface Publisher {
@@ -167,6 +171,7 @@ export function createPublisher({
     outDir: string,
     pr: PullRequest,
     commentable: Map<string, Set<number>>,
+    hold: boolean,
   ): Promise<PublishResult> {
     const build = (noInline: boolean) =>
       buildReview({
@@ -185,6 +190,9 @@ export function createPublisher({
     });
     await writeFile(join(outDir, "review-payload.json"), json(toPayload(build(false))));
     if (config.publish.mode === "dry-run") return { kind: "dry-run", draft: build(false) };
+    if (hold && build(false).event === "REQUEST_CHANGES") {
+      return { kind: "hold", event: "REQUEST_CHANGES" };
+    }
 
     const { review, draft, inlineDropped } = await create(job, build, toPayload, outDir);
     await savePosted(job, review, outDir);
@@ -198,6 +206,7 @@ export function createPublisher({
     pr: PullRequest,
     commentable: Map<string, Set<number>>,
     pending: PostedReview | undefined,
+    hold: boolean,
   ): Promise<PublishResult> {
     const followUp = run.followUp;
     if (!followUp) throw new Error("not a follow-up");
@@ -253,6 +262,10 @@ export function createPublisher({
       "follow-up decided",
     );
     if (config.publish.mode === "dry-run") return { kind: "dry-run", draft: build(false) };
+    // A draft left for you is already your call; only a submitted block waits.
+    if (hold && !pending && submit && decision.event === "REQUEST_CHANGES") {
+      return { kind: "hold", event: "REQUEST_CHANGES" };
+    }
 
     let review: PostedReview;
     let draft: FollowUpDraft;
@@ -312,7 +325,7 @@ export function createPublisher({
   }
 
   return {
-    async publish(job, run, outDir, { force = false } = {}) {
+    async publish(job, run, outDir, { force = false, hold = false } = {}) {
       // 1. Already posted? Covers a crash between the POST and the database update.
       const existing = await github.findOwnReview(
         job.repo,
@@ -331,10 +344,20 @@ export function createPublisher({
 
       // 3. Build the review from the saved result and the diff Claude saw, and post it.
       const commentable = parseCommentableLines(await readFile(join(outDir, "diff.patch"), "utf8"));
+      // Only a review that would really be submitted waits; a draft is already only yours.
+      const mayHold = hold && !force && config.publish.mode === "submit";
       try {
         return await (run.followUp
-          ? publishFollowUp(job, run, outDir, relevant, commentable, resume ? existing : undefined)
-          : publishFirst(job, run, outDir, relevant, commentable));
+          ? publishFollowUp(
+              job,
+              run,
+              outDir,
+              relevant,
+              commentable,
+              resume ? existing : undefined,
+              mayHold,
+            )
+          : publishFirst(job, run, outDir, relevant, commentable, mayHold));
       } catch (err) {
         if (!(err instanceof PendingReviewError)) throw err;
         const retryAt = new Date(now().getTime() + PENDING_RECHECK_MS);

@@ -192,6 +192,99 @@ describe("state", () => {
     });
   });
 
+  describe("hold for your OK", () => {
+    const t0 = new Date("2026-10-09T10:00:00Z");
+    const later = (min: number) => new Date(t0.getTime() + min * 60_000);
+    const heldJob = (until: Date | null = later(30)) => {
+      state.recordSeen(base);
+      const job = state.claimNext(t0);
+      if (!job) throw new Error("no job");
+      state.completeReview(job.id, { findings: 2, outputDir: "/r", costUsd: 1, durationMs: 1 });
+      state.claimNext(t0);
+      state.hold(job.id, until, t0);
+      return job.id;
+    };
+
+    it("waits until the timer runs out, then posts as released by the timer", () => {
+      const id = heldJob();
+      expect(state.get(id)).toMatchObject({
+        status: "held",
+        reason: "needs your OK",
+        hold_until: later(30).toISOString(),
+        released: null,
+      });
+      expect(state.claimNext(later(29))).toBeUndefined();
+      expect(state.claimNext(later(30))).toMatchObject({
+        id,
+        status: "posting",
+        released: "timer",
+      });
+    });
+
+    it("never times out a review you said you'd handle", () => {
+      const id = heldJob();
+      expect(state.holdForYou(id)).toMatchObject({ status: "held", hold_until: null });
+      expect(state.claimNext(later(600))).toBeUndefined();
+      expect(state.holdForYou(id)).toBeUndefined(); // no timer left to stop
+    });
+
+    it("posts at once when you press Post", () => {
+      const id = heldJob(null);
+      expect(state.release(id)).toMatchObject({ status: "reviewed", released: "you" });
+      expect(state.claimNext(t0)).toMatchObject({ id, status: "posting", released: "you" });
+      expect(state.release(id)).toBeUndefined(); // not held any more
+    });
+
+    it("discards a held review", () => {
+      const id = heldJob();
+      expect(state.discard(id)).toMatchObject({ status: "skipped", reason: "discarded by you" });
+      expect(state.claimNext(later(60))).toBeUndefined();
+    });
+
+    it("keeps the findings you drop, only while held", () => {
+      const id = heldJob();
+      expect(state.setDropped(id, ["F2"])?.dropped).toBe('["F2"]');
+      expect(state.setDropped(id, [])?.dropped).toBeNull();
+      state.release(id);
+      expect(state.setDropped(id, ["F1"])).toBeUndefined();
+    });
+
+    it("leaves held reviews alone while posting is paused", () => {
+      heldJob();
+      expect(state.claimNext(later(60), { skipPosting: true })).toBeUndefined();
+    });
+
+    it("drops a held review when a newer commit arrives", () => {
+      const id = heldJob();
+      state.recordSeen({ ...base, headSha: "9999999" });
+      expect(state.get(id)).toMatchObject({ status: "skipped", reason: "superseded" });
+    });
+
+    it("keeps your OK and drops when a failed post is retried", () => {
+      const id = heldJob();
+      state.setDropped(id, ["F1"]);
+      state.release(id);
+      state.claimNext(t0);
+      state.failAttempt(id, "502", 1, { retryStatus: "reviewed" });
+      expect(state.resetJob(id, "reviewed", ["failed"])).toMatchObject({
+        status: "reviewed",
+        released: "you",
+        dropped: '["F1"]',
+      });
+    });
+
+    it("forgets the hold and the drops on a re-review", () => {
+      const id = heldJob();
+      state.setDropped(id, ["F1"]);
+      expect(state.resetJob(id, "queued", ["held"])).toMatchObject({
+        status: "queued",
+        hold_until: null,
+        released: null,
+        dropped: null,
+      });
+    });
+  });
+
   describe("status page helpers", () => {
     it("resets a job only from the allowed statuses", () => {
       state.recordSeen(base);

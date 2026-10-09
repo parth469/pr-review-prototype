@@ -31,7 +31,7 @@ describe("config", () => {
         maxAttempts: 3,
         keepWorktree: false,
       },
-      publish: { mode: "submit", requireStillRequested: true },
+      publish: { mode: "submit", requireStillRequested: true, holdMin: 30 },
       followUp: {
         enabled: true,
         approve: "submit",
@@ -42,7 +42,7 @@ describe("config", () => {
         resolveThreads: true,
       },
       statusPage: { enabled: true, port: 4777 },
-      notify: { enabled: true, onPosted: true, onFailed: true },
+      notify: { enabled: true, onPosted: true, onFailed: true, onHeld: true },
     });
   });
 
