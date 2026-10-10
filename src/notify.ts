@@ -85,9 +85,26 @@ function followUpCounts(run: ReviewRun): string {
   return parts.join(" · ") || "Nothing left to check";
 }
 
-/** The desktop notification for a worker event. */
-export function notificationFor(event: WorkerEvent): Notification {
+const clock = (d: Date) =>
+  d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** The desktop notification for a worker event. `statusUrl`: the status page, if it runs. */
+export function notificationFor(
+  event: WorkerEvent,
+  { statusUrl }: { statusUrl?: string | undefined } = {},
+): Notification {
   const ref = `${event.job.repo}#${event.job.pr}`;
+  if (event.type === "held") {
+    const counts = event.run.followUp
+      ? followUpCounts(event.run)
+      : countFindings(event.run.review.findings);
+    const when = event.until ? `posts at ${clock(event.until)}` : "waits for you";
+    return {
+      title: `Needs your OK · ${ref}`,
+      body: `Would request changes: ${counts} · ${when} — ${event.job.title}`.slice(0, 250),
+      url: statusUrl ? `${statusUrl}/#job-${event.job.id}` : event.job.url,
+    };
+  }
   if (event.type === "posted") {
     const counts = event.run.followUp
       ? followUpCounts(event.run)
@@ -99,8 +116,9 @@ export function notificationFor(event: WorkerEvent): Notification {
         url: event.review.url,
       };
     }
+    const title = POSTED_TITLE[event.review.state] ?? "Reviewed";
     return {
-      title: `${POSTED_TITLE[event.review.state] ?? "Reviewed"} · ${ref}`,
+      title: `${event.afterTimer ? `${title} after the wait` : title} · ${ref}`,
       body: `${counts} — ${event.job.title}`,
       url: event.review.url,
     };

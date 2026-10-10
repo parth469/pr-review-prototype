@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Config } from "./config.ts";
 import {
@@ -8,6 +8,7 @@ import {
   type PostedFile,
   prepareFollowUp,
 } from "./followup.ts";
+import { dropFindings, parseDropped, type WakeWatch } from "./hold.ts";
 import type { Logger } from "./log.ts";
 import { loadPrompt } from "./prompt.ts";
 import { reviewMarker } from "./publish.ts";
@@ -21,6 +22,7 @@ import { numberFindings, renderReviewMarkdown } from "./report.ts";
 import type { ReviewRun, RunFollowUp, RunReview } from "./reviewer.ts";
 import {
   currentSessionUsage,
+  holdMinutes,
   recordSessionUsage,
   reviewSettings,
   type SessionUsage,
@@ -51,6 +53,9 @@ export interface WorkerDeps {
    * could not be posted while it exists: the job waits instead of running Claude for nothing.
    */
   findPendingReview?: (job: Job) => Promise<{ body: string } | undefined>;
+  /** Tells whether a held review's timer ran out while the PC slept; it then waits again. */
+  wakeWatch?: Pick<WakeWatch, "missedWhileAway">;
+  now?: () => Date;
 }
 
 export type WorkerEvent =
@@ -61,6 +66,15 @@ export type WorkerEvent =
       run: ReviewRun;
       /** Left as a draft for you, with the reason. */
       needsYou?: string | null;
+      /** Posted because a hold ran out without you. */
+      afterTimer?: boolean;
+    }
+  | {
+      type: "held";
+      job: Job;
+      run: ReviewRun;
+      /** When it posts by itself; null when it waits for you. */
+      until: Date | null;
     }
   | { type: "failed"; job: Job; step: "review" | "posting"; error: string };
 
@@ -101,6 +115,7 @@ type Fields = Record<string, unknown>;
 
 export function createWorker(deps: WorkerDeps): Worker {
   const { state, workspace, runReview, publisher, config, log } = deps;
+  const now = deps.now ?? (() => new Date());
   let wake: (() => void) | undefined;
   /** Reviews in progress, so the status page can stop one. */
   const running = new Map<number, AbortController>();
@@ -249,6 +264,8 @@ export function createWorker(deps: WorkerDeps): Worker {
       await Promise.all([
         writeFile(join(outDir, "result.json"), json(run)),
         writeFile(join(outDir, "review.md"), renderReviewMarkdown(prepared.pr, run)),
+        // The original kept by an earlier post with drops belongs to the earlier run.
+        rm(join(outDir, "result.ai.json"), { force: true }),
       ]);
       // Open points: earlier findings not settled yet, plus anything new.
       const open =
@@ -305,16 +322,60 @@ export function createWorker(deps: WorkerDeps): Worker {
     }
   }
 
+  /** Hold a review that would request changes; it posts by itself after the set minutes. */
+  function holdJob(job: Job, run: ReviewRun, fields: Fields): void {
+    const minutes = holdMinutes(state, config);
+    const until = new Date(now().getTime() + minutes * 60_000);
+    state.hold(job.id, until, now());
+    log.info({ ...fields, until, minutes }, "would request changes, waiting for your OK");
+    deps.onEvent?.({ type: "held", job: state.get(job.id) ?? job, run, until });
+  }
+
+  /**
+   * The review as it will be posted: without the findings you dropped. The AI's original
+   * stays in result.ai.json; result.json and review.md then show what was posted.
+   */
+  async function applyDrops(job: Job, run: ReviewRun, outDir: string): Promise<ReviewRun> {
+    const dropped = parseDropped(job.dropped);
+    if (dropped.length === 0) return run;
+    const kept = dropFindings(run, dropped);
+    try {
+      await writeFile(join(outDir, "result.ai.json"), json(run), { flag: "wx" });
+    } catch (err) {
+      // Already saved by an earlier attempt, which also had the original.
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+    const pr = await readJson<Parameters<typeof renderReviewMarkdown>[0]>(join(outDir, "pr.json"));
+    await Promise.all([
+      writeFile(join(outDir, "result.json"), json(kept)),
+      pr ? writeFile(join(outDir, "review.md"), renderReviewMarkdown(pr, kept)) : undefined,
+    ]);
+    return kept;
+  }
+
   /** Post a saved review. The job must be in status `posting`. */
   async function publish(
     job: Job,
-    run: ReviewRun,
+    saved: ReviewRun,
     outDir: string,
     fields: Fields,
     options: PublishOptions,
   ): Promise<void> {
     try {
-      const result = await publisher.publish(job, run, outDir, options);
+      // Its timer ran out while you were away: you get the full wait again.
+      if (
+        job.released === "timer" &&
+        job.hold_until &&
+        holdMinutes(state, config) > 0 &&
+        deps.wakeWatch?.missedWhileAway(job.hold_until)
+      ) {
+        log.info({ ...fields, holdUntil: job.hold_until }, "hold ran out while away");
+        holdJob(job, saved, fields);
+        return;
+      }
+      const run = await applyDrops(job, saved, outDir);
+      const hold = !options.force && !job.released && holdMinutes(state, config) > 0;
+      const result = await publisher.publish(job, run, outDir, { ...options, hold });
       switch (result.kind) {
         case "posted":
         case "existing": {
@@ -344,10 +405,14 @@ export function createWorker(deps: WorkerDeps): Worker {
             result.kind === "posted" ? "posted" : "already posted",
           );
           if (result.kind === "posted") {
-            deps.onEvent?.({ type: "posted", job, review, run, needsYou });
+            const afterTimer = job.released === "timer";
+            deps.onEvent?.({ type: "posted", job, review, run, needsYou, afterTimer });
           }
           break;
         }
+        case "hold":
+          holdJob(job, run, fields);
+          break;
         case "wait":
           state.defer(job.id, result.retryAt, result.reason, undefined, { ci: result.ci ?? true });
           log.info({ ...fields, reason: result.reason, retryAt: result.retryAt }, "posting later");
@@ -433,7 +498,7 @@ export function createWorker(deps: WorkerDeps): Worker {
     const paused = () => deps.isPostingPaused?.() ?? false;
     const job =
       jobId === undefined
-        ? state.claimNext(undefined, { skipPosting: paused() })
+        ? state.claimNext(now(), { skipPosting: paused() })
         : state.claimById(jobId);
     if (!job) return undefined;
     const fields = { job: job.id, repo: job.repo, pr: job.pr, sha: job.head_sha.slice(0, 7) };

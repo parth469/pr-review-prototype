@@ -105,6 +105,36 @@ describe("notificationFor", () => {
     });
   });
 
+  it("asks for your OK when a review waits before requesting changes", () => {
+    const held = notificationFor(
+      { type: "held", job: { ...job, id: 7 }, run, until: new Date("2026-10-09T10:30:00") },
+      { statusUrl: "http://localhost:4777" },
+    );
+    expect(held).toMatchObject({
+      title: "Needs your OK · acme/api#128",
+      url: "http://localhost:4777/#job-7",
+    });
+    expect(held.body).toMatch(/^Would request changes: 2 bugs · 1 nit · posts at 10:30 — Fix/);
+  });
+
+  it("says when a held review waits for you, and links to the PR without a status page", () => {
+    const held = notificationFor({ type: "held", job, run, until: null });
+    expect(held.body).toContain("· waits for you —");
+    expect(held.url).toBe(job.url);
+  });
+
+  it("says a review was posted after the wait ran out", () => {
+    expect(
+      notificationFor({
+        type: "posted",
+        job,
+        run,
+        review: { id: 1, url: "https://r", state: "CHANGES_REQUESTED" },
+        afterTimer: true,
+      }).title,
+    ).toBe("Requested changes after the wait · acme/api#128");
+  });
+
   it("links a failure to the PR", () => {
     expect(notificationFor({ type: "failed", job, step: "posting", error: "GitHub 502" })).toEqual({
       title: "Review failed · acme/api#128",

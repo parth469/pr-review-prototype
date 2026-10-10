@@ -222,6 +222,53 @@ describe("publisher", () => {
     });
   });
 
+  describe("hold for your OK", () => {
+    const hold = { hold: true };
+
+    it("holds a review that would request changes, posting nothing", async () => {
+      const github = fakeGitHub();
+      expect(await make(github).publish(job, run, outDir, hold)).toEqual({
+        kind: "hold",
+        event: "REQUEST_CHANGES",
+      });
+      expect(github.posts).toHaveLength(0);
+    });
+
+    it("posts an approval at once", async () => {
+      const github = fakeGitHub();
+      const nits: ReviewRun = {
+        ...run,
+        review: { ...run.review, findings: [run.review.findings[1] as Finding] },
+      };
+      const result = await make(github).publish(job, nits, outDir, hold);
+      expect(result).toMatchObject({ kind: "posted", review: { state: "APPROVED" } });
+    });
+
+    it("posts a comment on your own PR at once", async () => {
+      const github = fakeGitHub({ pr: { author: "me" } });
+      expect((await make(github).publish(job, run, outDir, hold)).kind).toBe("posted");
+    });
+
+    it("never holds a review you started by hand", async () => {
+      const github = fakeGitHub();
+      const result = await make(github).publish(job, run, outDir, { hold: true, force: true });
+      expect(result).toMatchObject({ kind: "posted", review: { state: "CHANGES_REQUESTED" } });
+    });
+
+    it.each(["pending", "dry-run"])("does not hold in %s mode", async (mode) => {
+      const result = await make(fakeGitHub(), { mode }).publish(job, run, outDir, hold);
+      expect(result.kind).not.toBe("hold");
+    });
+
+    it("skips a closed PR instead of holding it", async () => {
+      const github = fakeGitHub({ pr: { state: "closed", merged: true } });
+      expect(await make(github).publish(job, run, outDir, hold)).toEqual({
+        kind: "skipped",
+        reason: "merged",
+      });
+    });
+  });
+
   it("saves where each inline finding's thread is", async () => {
     const github = fakeGitHub();
     const numbered: ReviewRun = {
@@ -449,6 +496,37 @@ describe("publisher: follow-up", () => {
       `**F2 · 🟡 risk** New risk.\n\n<!-- proxy-finding:${pr.headSha.slice(0, 7)}:F2 -->`,
     );
     expect(github.posts[0]?.body).toContain("**New since the last review: 1 risk**");
+  });
+
+  it("holds a follow-up that would request changes, but not an approval", async () => {
+    const github = fakeGitHub({ threads: threadsFor(["F1"]) });
+    const open = followUpRun([checked("F1", "bug", "not_fixed")]);
+    expect(await make(github).publish(fuJob, open, outDir, { hold: true })).toEqual({
+      kind: "hold",
+      event: "REQUEST_CHANGES",
+    });
+    expect(github.posts).toHaveLength(0);
+
+    const fixed = followUpRun([checked("F1", "bug", "fixed")]);
+    const result = await make(github).publish(fuJob, fixed, outDir, { hold: true });
+    expect(result).toMatchObject({ kind: "posted", review: { state: "APPROVED" } });
+  });
+
+  it("does not hold a follow-up already left as a draft for you", async () => {
+    const github = fakeGitHub({ threads: threadsFor(["F1"]) });
+    const result = await make(github, { followUp: { maxAutoRounds: 2 } }).publish(
+      { ...fuJob, round: 3 } as Job,
+      (() => {
+        const r = followUpRun([checked("F1", "bug", "not_fixed")]);
+        return {
+          ...r,
+          followUp: { ...(r.followUp as NonNullable<ReviewRun["followUp"]>), round: 3 },
+        };
+      })(),
+      outDir,
+      { hold: true },
+    );
+    expect(result).toMatchObject({ kind: "posted", review: { state: "PENDING" } });
   });
 
   it("writes the decision but posts nothing in dry-run mode", async () => {

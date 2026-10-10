@@ -9,6 +9,8 @@ export type Effort = (typeof EFFORTS)[number];
 /** How findings are written; also pickable on the status page. See docs/review-styles.html. */
 export const STYLES = ["readable", "caveman-readable", "caveman-classic"] as const;
 export type Style = (typeof STYLES)[number];
+/** Minutes a review that would request changes waits for you, as offered on the status page. */
+export const HOLD_CHOICES = [0, 15, 30, 60, 120] as const;
 
 const repoPattern = z
   .string()
@@ -56,6 +58,9 @@ export const configSchema = z.object({
       mode: z.enum(["submit", "pending", "dry-run"]).default("submit"),
       // Skip posting if you are no longer a requested reviewer (e.g. you reviewed by hand).
       requireStillRequested: z.boolean().default(true),
+      // A review that would request changes waits this many minutes for your OK on the status
+      // page, then posts as it is. 0 = post at once. Default only: a pick on the page wins.
+      holdMin: z.number().int().min(0).default(30),
     })
     .prefault({}),
   followUp: z
@@ -86,6 +91,8 @@ export const configSchema = z.object({
       enabled: z.boolean().default(true),
       onPosted: z.boolean().default(true),
       onFailed: z.boolean().default(true),
+      // A review waits for your OK (see publish.holdMin).
+      onHeld: z.boolean().default(true),
     })
     .prefault({}),
 });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.ts";
-import { createRuntime, isPostingPaused } from "../src/runtime.ts";
+import { createRuntime, holdMinutes, isPostingPaused } from "../src/runtime.ts";
 import { openState, type State } from "../src/state.ts";
 import { type StatusServer, startStatusServer } from "../src/web/server.ts";
 import { silentLog } from "./helpers.ts";
@@ -273,6 +273,95 @@ describe("status server", () => {
     expect((await set({ model: "gpt-5" })).status).toBe(400);
     expect((await set({ style: "terse" })).status).toBe(400);
     expect(await status()).toMatchObject(picked);
+  });
+
+  describe("a review waiting for your OK", () => {
+    const post = (p: string, body?: unknown) =>
+      call(server.port, p, {
+        method: "POST",
+        token: server.token,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    const heldJob = () => {
+      seed(1);
+      const job = state.claimNext();
+      if (!job) throw new Error("no job");
+      const out = join(dir, "held");
+      mkdirSync(out, { recursive: true });
+      const findings = ["F1", "F2", "F3"].map((id) => ({
+        id,
+        path: "a",
+        line: 1,
+        severity: "bug",
+      }));
+      writeFileSync(
+        join(out, "result.json"),
+        JSON.stringify({ review: { summary: "s", verdict: "request_changes", findings } }),
+      );
+      state.completeReview(job.id, { findings: 3, outputDir: out, costUsd: 1, durationMs: 1 });
+      state.claimNext();
+      state.hold(job.id, new Date(Date.now() + 30 * 60_000));
+      return job.id;
+    };
+
+    it("posts it now and wakes the worker", async () => {
+      const id = heldJob();
+      const res = await post(`/api/jobs/${id}/post`);
+      expect(JSON.parse(res.body)).toMatchObject({ status: "reviewed", released: "you" });
+      expect(kicks).toBe(1);
+      expect((await post(`/api/jobs/${id}/post`)).status).toBe(409);
+    });
+
+    it("stops the timer when you'll handle it", async () => {
+      const id = heldJob();
+      expect(JSON.parse((await post(`/api/jobs/${id}/handle`)).body)).toMatchObject({
+        status: "held",
+        hold_until: null,
+      });
+      expect((await post(`/api/jobs/${id}/handle`)).status).toBe(409);
+    });
+
+    it("discards it", async () => {
+      const id = heldJob();
+      expect(JSON.parse((await post(`/api/jobs/${id}/discard`)).body)).toMatchObject({
+        status: "skipped",
+        reason: "discarded by you",
+      });
+    });
+
+    it("keeps the findings you drop, and only real new findings", async () => {
+      const id = heldJob();
+      const res = await post(`/api/jobs/${id}/drop`, { ids: ["F2", "F2", "F3"] });
+      expect(JSON.parse(res.body).dropped).toBe('["F2","F3"]');
+      expect((await post(`/api/jobs/${id}/drop`, { ids: ["F9"] })).status).toBe(400);
+      expect((await post(`/api/jobs/${id}/drop`, { ids: ["<b>"] })).status).toBe(400);
+      expect((await post(`/api/jobs/${id}/drop`, { ids: [] })).status).toBe(200);
+      expect(state.get(id)?.dropped).toBeNull();
+      state.release(id);
+      expect((await post(`/api/jobs/${id}/drop`, { ids: ["F1"] })).status).toBe(409);
+    });
+
+    it("can be re-reviewed", async () => {
+      const id = heldJob();
+      expect(JSON.parse((await post(`/api/jobs/${id}/rereview`)).body).status).toBe("queued");
+    });
+  });
+
+  it("picks how long Request changes waits, and refuses other values", async () => {
+    const post = (body: unknown) =>
+      call(server.port, "/api/hold", {
+        method: "POST",
+        token: server.token,
+        body: JSON.stringify(body),
+      });
+    let status = JSON.parse((await call(server.port, "/api/status")).body);
+    expect(status).toMatchObject({ holdMin: 30, holdChoices: [0, 15, 30, 60, 120] });
+    expect(JSON.parse((await post({ minutes: 0 })).body)).toEqual({ holdMin: 0 });
+    expect(holdMinutes(state, parseConfig({}))).toBe(0);
+    expect((await post({ minutes: 7 })).status).toBe(400);
+    expect((await post({ minutes: "30" })).status).toBe(400);
+    status = JSON.parse((await call(server.port, "/api/status")).body);
+    expect(status.holdMin).toBe(0);
   });
 
   it("gives up quietly when the port is taken", async () => {

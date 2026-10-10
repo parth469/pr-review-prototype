@@ -83,6 +83,24 @@ export function setReviewChoice(
   if (choice.style) state.setSetting(REVIEW_STYLE, choice.style);
 }
 
+const HOLD_MIN = "hold_min";
+
+/** Minutes a review that would request changes waits for you: config, or the page's pick. */
+export function holdMinutes(
+  state: Pick<State, "getSetting">,
+  config: Pick<Config, "publish">,
+): number {
+  const picked = Number(state.getSetting(HOLD_MIN));
+  return state.getSetting(HOLD_MIN) !== undefined && Number.isInteger(picked) && picked >= 0
+    ? picked
+    : config.publish.holdMin;
+}
+
+/** Saved in the database. Reviews already waiting keep the timer they started with. */
+export function setHoldMinutes(state: Pick<State, "setSetting">, minutes: number): void {
+  state.setSetting(HOLD_MIN, String(minutes));
+}
+
 const SESSION_USAGE = "session_usage";
 
 /** The latest 5-hour usage Claude reported, saved so a restart still knows it. */

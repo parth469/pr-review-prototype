@@ -5,13 +5,15 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { z } from "zod";
-import { type Config, EFFORTS, MODELS, STYLES } from "../config.ts";
+import { type Config, EFFORTS, HOLD_CHOICES, MODELS, STYLES } from "../config.ts";
 import type { Logger } from "../log.ts";
 import {
   currentSessionUsage,
+  holdMinutes,
   isPostingPaused,
   type Runtime,
   reviewSettings,
+  setHoldMinutes,
   setPostingPaused,
   setReviewChoice,
 } from "../runtime.ts";
@@ -44,6 +46,7 @@ const STATUSES: JobStatus[] = [
   "preparing",
   "reviewing",
   "reviewed",
+  "held",
   "posting",
   "done",
   "failed",
@@ -77,6 +80,13 @@ const reviewChoiceSchema = z.strictObject({
   effort: z.enum(EFFORTS).optional(),
   style: z.enum(STYLES).optional(),
 });
+
+const dropSchema = z.strictObject({ ids: z.array(z.string().regex(/^F\d+$/)).max(200) });
+const holdSchema = z.strictObject({ minutes: z.number().int().min(0) });
+
+/** Minutes offered on the page: the usual choices plus the config default. */
+const holdChoices = (config: Config) =>
+  [...new Set<number>([...HOLD_CHOICES, config.publish.holdMin])].sort((a, b) => a - b);
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   let text = "";
@@ -127,7 +137,21 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         break;
       }
       case "rereview":
-        after = state.resetJob(job.id, "queued", ["done", "reviewed", "skipped", "failed"]);
+        after = state.resetJob(job.id, "queued", ["done", "reviewed", "held", "skipped", "failed"]);
+        break;
+      // A review waiting for your OK: post it now, take your time, or post nothing.
+      case "post":
+        after = state.release(job.id);
+        break;
+      case "handle":
+        after = state.holdForYou(job.id);
+        if (after) {
+          log.info({ job: job.id, repo: job.repo, pr: job.pr, action }, "status page action");
+          return after;
+        }
+        break;
+      case "discard":
+        after = state.discard(job.id);
         break;
       case "review-now":
         after = state.resetJob(job.id, "queued", ["skipped"]);
@@ -169,6 +193,22 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
     return state.get(job.id) as Job;
   }
 
+  /** The F-ids you dropped from a held review; only its new findings can be dropped. */
+  async function dropFindings(job: Job, body: unknown): Promise<Job> {
+    const parsed = dropSchema.safeParse(body);
+    if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
+    if (job.status !== "held") throw new HttpError(409, `Can't change a job that is ${job.status}`);
+    const run = (await readSavedReview(job)) as { review?: { findings?: { id?: string }[] } };
+    const known = new Set((run?.review?.findings ?? []).map((f) => f.id));
+    const unknown = parsed.data.ids.filter((id) => !known.has(id));
+    if (unknown.length > 0) throw new HttpError(400, `Not a new finding: ${unknown.join(", ")}`);
+    const ids = [...new Set(parsed.data.ids)];
+    const after = state.setDropped(job.id, ids);
+    if (!after) throw new HttpError(409, "That review is not waiting any more");
+    log.info({ job: job.id, repo: job.repo, pr: job.pr, dropped: ids }, "findings dropped");
+    return after;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // DNS rebinding: a hostile name that resolves to 127.0.0.1 still sends its own Host.
     if (!allowedHosts().has(req.headers.host ?? "")) throw new HttpError(403, "Bad host");
@@ -181,6 +221,10 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
       if (jobAction?.[1] && jobAction[2] === "approve") {
         return sendJson(res, 200, await approveJob(jobOr404(jobAction[1])));
       }
+      if (jobAction?.[1] && jobAction[2] === "drop") {
+        const job = jobOr404(jobAction[1]);
+        return sendJson(res, 200, await dropFindings(job, await readJsonBody(req)));
+      }
       if (jobAction?.[1] && jobAction[2]) {
         return sendJson(res, 200, act(jobOr404(jobAction[1]), jobAction[2]));
       }
@@ -190,6 +234,16 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         log.info({ paused }, paused ? "posting paused" : "posting resumed");
         if (!paused) worker.kick();
         return sendJson(res, 200, { postingPaused: paused });
+      }
+      if (path === "/api/hold") {
+        const parsed = holdSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
+        if (!holdChoices(config).includes(parsed.data.minutes)) {
+          throw new HttpError(400, `Pick one of ${holdChoices(config).join(", ")} minutes`);
+        }
+        setHoldMinutes(state, parsed.data.minutes);
+        log.info({ minutes: parsed.data.minutes }, "hold time changed");
+        return sendJson(res, 200, { holdMin: parsed.data.minutes });
       }
       if (path === "/api/review-settings") {
         const parsed = reviewChoiceSchema.safeParse(await readJsonBody(req));
@@ -232,6 +286,8 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         styles: STYLES.map((key) => ({ key, label: STYLE_SPECS[key].label })),
         sessionUsage: currentSessionUsage(state) ?? null,
         maxSessionUsagePct: config.review.maxSessionUsagePct,
+        holdMin: holdMinutes(state, config),
+        holdChoices: holdChoices(config),
         counts,
       });
     }

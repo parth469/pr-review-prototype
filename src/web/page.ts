@@ -81,6 +81,8 @@ tbody tr.selected { background: var(--sunken); box-shadow: inset 3px 0 0 var(--a
 .detail .meta { color: var(--muted); font-size: 13px; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .detail .summary { margin: 0 0 14px; }
 .finding { border-top: 1px solid var(--line); padding: 10px 0; }
+.finding.dropped > :not(.pick) { opacity: .5; }
+.finding .pick { float: right; margin-left: 8px; }
 .finding .loc { font-family: var(--mono); font-size: 12.5px; margin-left: 6px; }
 .finding p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .finding .why { color: var(--muted); font-size: 13px; }
@@ -107,6 +109,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--sunken); b
       <label title="Model for the next review. A review already running keeps its model.">Model <select id="model"></select></label>
       <label title="Effort for the next review.">Effort <select id="effort"></select></label>
       <label title="How findings are written in the next review. A review already running keeps its style.">Style <select id="style"></select></label>
+      <label title="A review that would request changes waits this long for your OK, then posts as it is. Reviews already waiting keep their time.">Wait for OK <select id="hold"></select></label>
     </div>
     <button id="pause" type="button" hidden></button>
   </header>
@@ -178,6 +181,12 @@ function describe(job) {
     }
     return ["Commented", "comment"];
   }
+  if (s === "held") {
+    var dropped = droppedOf(job).length;
+    var when = job.hold_until ? "Posts as it is at " + time(job.hold_until) : "Waiting for you, no timer";
+    if (paused && job.hold_until) when += " · posting paused";
+    return ["Needs your OK", "pending", when + (dropped ? " · " + dropped + " dropped" : "")];
+  }
   if (s === "reviewed") {
     if (paused) return ["Waiting to post", "pending", "Posting is paused"];
     if (job.reason === "waiting for CI") return ["Waiting for CI", "work", "Next check " + time(job.next_attempt_at)];
@@ -190,6 +199,7 @@ function describe(job) {
   if (s === "posting") return ["Posting…", "work"];
   if (s === "failed") return ["Failed", "change", job.error];
   if (s === "skipped" && job.reason === "stopped by you") return ["Stopped", "quiet", "Review now starts it again"];
+  if (s === "skipped" && job.reason === "discarded by you") return ["Discarded", "quiet", "Nothing posted"];
   if (s === "skipped") return ["Skipped", "quiet", job.reason];
   return [s, "quiet"];
 }
@@ -197,23 +207,29 @@ function actionsFor(job) {
   var a = [];
   if (job.status === "preparing" || job.status === "reviewing") a.push(["stop", "Stop", "Stop this review now. Nothing is posted; Review now starts it again."]);
   if (job.status === "failed") a.push(["retry", "Retry", "Try again. A saved review is only posted, not re-run."]);
-  if (job.status === "skipped") a.push(["review-now", "Review now", "Review it anyway, ignoring the skip rule."]);
+  if (job.status === "skipped" && job.reason !== "discarded by you") a.push(["review-now", "Review now", "Review it anyway, ignoring the skip rule."]);
+  if (job.status === "held") {
+    a.push(["post", "Post", "Post it now, without the findings you dropped."]);
+    if (job.hold_until) a.push(["handle", "I'll handle it", "Stop the timer. It waits until you press Post or Discard."]);
+    a.push(["discard", "Discard", "Post nothing for this commit."]);
+  }
   // Only a re-requested review: approve it yourself, whatever the posted review said.
   if (canApprove && job.round > 1 && job.status === "done" && job.event !== "APPROVED" && job.reason !== "dry-run")
     a.push(["approve", "Approve", "Approve this PR on GitHub now, overriding the posted review. A draft left for your OK is submitted as the approval."]);
-  if (["done", "reviewed", "failed"].indexOf(job.status) >= 0)
+  if (["done", "reviewed", "held", "failed"].indexOf(job.status) >= 0)
     a.push(["rereview", "Re-review", "Run Claude again on this commit. If a review of this commit is already on GitHub, it is not posted twice."]);
   return a;
 }
 function actionButton(job, action) {
-  var b = el("button", { type: "button", text: action[1], title: action[2], class: action[0] === "stop" ? "danger" : action[0] === "approve" ? "primary" : "" });
+  var b = el("button", { type: "button", text: action[1], title: action[2], class: action[0] === "stop" || action[0] === "discard" ? "danger" : action[0] === "approve" || action[0] === "post" ? "primary" : "" });
   b.addEventListener("click", function (e) {
     e.stopPropagation();
     if (action[0] === "stop" && !confirm("Stop the review of " + job.repo + "#" + job.pr + "? Nothing is posted.")) return;
     if (action[0] === "approve" && !confirm("Approve " + job.repo + "#" + job.pr + " on GitHub as you?")) return;
+    if (action[0] === "discard" && !confirm("Discard the review of " + job.repo + "#" + job.pr + "? Nothing is posted.")) return;
     b.disabled = true;
     api("/api/jobs/" + job.id + "/" + action[0], true)
-      .then(function () { toast(action[1] + ": " + job.repo + "#" + job.pr); refresh(); })
+      .then(function () { toast(action[1] + ": " + job.repo + "#" + job.pr); if (selected === job.id) select(job.id); else refresh(); })
       .catch(function (err) { toast(err.message); })
       .finally(function () { b.disabled = false; });
   });
@@ -241,7 +257,7 @@ function renderStatus(st) {
   btn.textContent = paused ? "Resume posting" : "Pause posting";
   btn.className = paused ? "primary" : "";
   document.getElementById("banner").hidden = !paused;
-  var labels = { done: "posted", reviewed: "waiting to post", queued: "queued", preparing: "checking out", reviewing: "reviewing", posting: "posting", failed: "failed", skipped: "skipped" };
+  var labels = { done: "posted", held: "need your OK", reviewed: "waiting to post", queued: "queued", preparing: "checking out", reviewing: "reviewing", posting: "posting", failed: "failed", skipped: "skipped" };
   document.getElementById("counts").replaceChildren.apply(
     document.getElementById("counts"),
     Object.keys(st.counts).map(function (k) { return el("span", { class: "chip quiet", text: st.counts[k] + " " + (labels[k] || k) }); })
@@ -263,7 +279,17 @@ function renderPicks(st) {
   fillSelect("effort", st.efforts, st.effort);
   (st.styles || []).forEach(function (s) { LABELS[s.key] = s.label; });
   fillSelect("style", (st.styles || []).map(function (s) { return s.key; }), st.style);
+  (st.holdChoices || []).forEach(function (m) { LABELS["hold:" + m] = m === 0 ? "Off" : m < 60 ? m + " min" : (m / 60) + " h"; });
+  fillSelect("hold", (st.holdChoices || []).map(function (m) { return "hold:" + m; }), "hold:" + st.holdMin);
 }
+document.getElementById("hold").addEventListener("change", function () {
+  var sel = this;
+  sel.disabled = true;
+  api("/api/hold", true, { minutes: Number(sel.value.slice(5)) })
+    .then(function (r) { toast(r.holdMin === 0 ? "Request changes posts at once" : "Request changes waits " + LABELS["hold:" + r.holdMin] + " for your OK"); })
+    .catch(function (err) { toast(err.message); })
+    .finally(function () { sel.disabled = false; sel.blur(); refresh(); });
+});
 ["model", "effort", "style"].forEach(function (id) {
   var sel = document.getElementById(id);
   sel.addEventListener("change", function () {
@@ -323,12 +349,33 @@ function labeled(label, text) {
   p.insertBefore(el("b", { text: label + ": " }), p.firstChild);
   return p;
 }
-function findingRow(f) {
+function droppedOf(job) {
+  try { var ids = JSON.parse(job.dropped || "[]"); return Array.isArray(ids) ? ids : []; } catch (e) { return []; }
+}
+// Keep or Drop one new finding of a held review. The whole list is saved on each click.
+function pickButton(job, f) {
+  var dropped = droppedOf(job), isDropped = dropped.indexOf(f.id) >= 0;
+  var b = el("button", { type: "button", class: "pick", text: isDropped ? "Keep" : "Drop",
+    title: isDropped ? "Post this finding after all." : "Don't post this finding. The author never sees it." });
+  b.addEventListener("click", function () {
+    var next = isDropped ? dropped.filter(function (id) { return id !== f.id; }) : dropped.concat([f.id]);
+    b.disabled = true;
+    api("/api/jobs/" + job.id + "/drop", true, { ids: next })
+      .then(function () { toast((isDropped ? "Keeping " : "Dropped ") + f.id); select(job.id); })
+      .catch(function (err) { toast(err.message); b.disabled = false; });
+  });
+  return b;
+}
+function findingRow(f, job) {
   var s = SEVERITY[f.severity] || [f.severity, "quiet"];
-  var kids = [f.id ? el("span", { class: "fid", text: f.id }) : null, el("span", { class: "chip " + s[1], text: s[0] }), el("span", { class: "loc", text: where(f) })];
+  var held = job && job.status === "held" && f.id;
+  var isDropped = held && droppedOf(job).indexOf(f.id) >= 0;
+  var cls = "finding" + (isDropped ? " dropped" : "");
+  var kids = [held ? pickButton(job, f) : null, f.id ? el("span", { class: "fid", text: f.id }) : null, el("span", { class: "chip " + s[1], text: s[0] }),
+    isDropped ? el("span", { class: "chip quiet round", text: "dropped" }) : null, el("span", { class: "loc", text: where(f) })];
   // Findings saved before the readable parts existed have one free-text body.
-  if (!f.title) return el("div", { class: "finding" }, kids.concat([richText("p", f.body || "")]));
-  return el("div", { class: "finding" }, kids.concat([
+  if (!f.title) return el("div", { class: cls }, kids.concat([richText("p", f.body || "")]));
+  return el("div", { class: cls }, kids.concat([
     el("p", { class: "ftitle", text: f.title }),
     labeled("What's wrong", f.problem),
     labeled("What happens if not fixed", f.impact),
@@ -352,6 +399,7 @@ function renderDetail(data) {
     actionsFor(job).length ? el("div", { class: "actions" }, actionsFor(job).map(function (a) { return actionButton(job, a); })) : null
   ];
   if (job.error) parts.push(el("p", { class: "summary", text: "Error: " + job.error }));
+  if (job.status === "held") parts.push(el("p", { class: "summary", text: "This would request changes. Drop the findings you disagree with, then press Post. Untouched findings post as written." + (job.hold_until ? " If you do nothing, it posts at " + time(job.hold_until) + "." : "") }));
   if (run) {
     parts.push(richText("p", run.review.summary, "summary"));
     var fu = run.followUp;
@@ -373,7 +421,7 @@ function renderDetail(data) {
       if (run.review.findings.length) parts.push(el("h3", { text: "New since the last review" }));
     }
     run.review.findings.slice().sort(function (a, b) { return ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity); }).forEach(function (f) {
-      parts.push(findingRow(f));
+      parts.push(findingRow(f, job));
     });
     if (!run.review.findings.length && !fu) parts.push(el("p", { class: "summary", text: "No findings." }));
   } else if (!job.error) {
@@ -405,7 +453,9 @@ document.getElementById("pause").addEventListener("click", function () {
     .catch(function (err) { toast(err.message); })
     .finally(function () { b.disabled = false; });
 });
-refresh();
+// A notification links to #job-<id>: open that review.
+var linked = /^#job-(\\d+)$/.exec(location.hash);
+if (linked) select(Number(linked[1])); else refresh();
 setInterval(function () { refresh(); if (selected != null) api("/api/jobs/" + selected).then(renderDetail).catch(function () {}); }, 5000);
 </script>
 </body>

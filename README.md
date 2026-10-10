@@ -6,6 +6,8 @@ A local background process that finds GitHub PRs where you are a requested revie
 
 Each finding is written so a person can judge it and an AI tool can fix it: a plain title, what's wrong, what happens if it's not fixed, the fix (with a one-click GitHub suggestion when safe), and the reasoning folded underneath. Three review styles can be picked on the status page; why, what each costs and what we picked: [`docs/review-styles.html`](docs/review-styles.html).
 
+A review that would **request changes** waits on the status page for your OK first: post it, drop findings you disagree with, take your time or discard it. If you do nothing, it posts as it is after 30 minutes. Design, decisions and what is left for later: [`docs/hold-for-your-ok.html`](docs/hold-for-your-ok.html).
+
 ## Requirements
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
 - [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`. The daemon reuses that login.
@@ -32,7 +34,7 @@ npm run service -- test-notify  # show a sample desktop notification
 - **Starts by itself.** A Task Scheduler task named "Proxy Reviewer" starts 30 s after you log on, runs as you with no window, and never needs admin rights. It only runs while you are logged on, because it uses your `gh` and Claude logins.
 - **Restarts itself.** A small supervisor restarts the server after a crash (5 s, 15 s, 1 min, then every 5 min). If startup checks fail (for example, no network yet or logged out of `gh`), it retries more slowly and sends one notification with the reason.
 - **One at a time.** A lock file stops a second server. `npm start` while the service runs says "already running".
-- **Notifications.** A Windows notification appears when a review is posted ("Requested changes · owner/repo#12") or when a job fails for good. Click it to open the PR.
+- **Notifications.** A Windows notification appears when a review is posted ("Requested changes · owner/repo#12"), when one waits for your OK ("Needs your OK · owner/repo#12", click to open it on the status page), or when a job fails for good. Click the others to open the PR.
 - **Logs.** `logs/proxy-reviewer.<date>.N.log` (server) and `logs/supervisor.<date>.N.log`, rotated daily or at 10 MB, keeping the last 7.
 - **Sleep.** Nothing runs while the PC sleeps. On wake the next poll picks up whatever is waiting.
 
@@ -44,9 +46,13 @@ Open **http://localhost:4777** while the server runs. It lists recent PRs with t
 | **Retry** | failed | Tries again. A saved review is only posted, not re-run. |
 | **Re-review** | posted, waiting, failed | Runs Claude again on the same commit. If a review of that commit is already on GitHub, it is not posted twice. An older commit of a PR that has moved on is marked superseded. |
 | **Review now** | skipped | Reviews it anyway, ignoring the skip rule (draft, too large...). |
+| **Post** | needs your OK | Posts it now, without the findings you dropped. |
+| **I'll handle it** | needs your OK, timer running | Stops the timer; it waits until you press Post or Discard. |
+| **Discard** | needs your OK | Posts nothing for this commit. |
+| **Drop / Keep** | each new finding of a review that needs your OK | Leaves the finding out of the post (the author never sees it), or puts it back. Saved at once; the timer uses your choices. |
 | **Pause posting / Resume** | header | While paused, reviews still run and wait unposted. Resume posts them. Survives restarts. |
 
-The header also has **Model**, **Effort** and **Style** pickers for the next review. Style is how findings are written: *New skill + new format* (default), *Caveman + new format* or *Caveman + old format*. A pick applies from the next review on, survives restarts, and a running review keeps what it started with. See [`docs/review-styles.html`](docs/review-styles.html).
+The header also has **Model**, **Effort** and **Style** pickers for the next review. Style is how findings are written: *New skill + new format* (default), *Caveman + new format* or *Caveman + old format*. A pick applies from the next review on, survives restarts, and a running review keeps what it started with. See [`docs/review-styles.html`](docs/review-styles.html). **Wait for OK** sets how long a review that would request changes waits for you: Off, 15, 30 min, 1 h or 2 h. A review already waiting keeps its time.
 
 It listens on 127.0.0.1 only. Buttons need a secret token that is only in the page, and requests for other host names are refused, so other websites open in your browser can't press them. Turn it off or move it with `statusPage.enabled` and `statusPage.port`.
 
@@ -92,7 +98,9 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `notify.enabled` | `true` | Desktop notifications on/off |
 | `notify.onPosted` | `true` | Notify when a review is posted |
 | `notify.onFailed` | `true` | Notify when a job gives up after its last attempt |
+| `notify.onHeld` | `true` | Notify when a review waits for your OK |
 | `publish.mode` | `submit` | `submit` posts at once · `pending` leaves a draft only you can see · `dry-run` posts nothing and writes the payload |
+| `publish.holdMin` | `30` | A review that would request changes waits this many minutes for your OK, then posts as it is. `0` = post at once. Default only: the **Wait for OK** pick on the status page wins. `--review` never waits |
 | `publish.requireStillRequested` | `true` | Don't post if you are no longer a requested reviewer (for example, you already reviewed by hand). `--review` ignores this |
 | `followUp.enabled` | `true` | Check earlier findings when a PR you reviewed asks for you again. Off: every commit gets a full review |
 | `followUp.approve` | `submit` | `submit` approves at once · `pending` leaves every approval as a draft for you |
@@ -109,6 +117,7 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 4. **Save.** Writes everything to `reviews/<owner>-<repo>-<pr>-<sha>/`, marks the job `reviewed` and removes the checkout.
 5. **Publish.** Posts one review against the reviewed commit:
    - **Request changes** when there is at least one 🔴 bug or 🟡 risk. Only 🔵 nits and ❓ questions, or nothing found, **approves**; the nits stay as inline comments. Nits and questions never block.
+   - A Request changes (round one or later) first **waits for your OK** on the status page, for `publish.holdMin` minutes. You can post it, drop findings, stop the timer or discard it; with findings dropped the event is worked out again, so dropping every bug and risk approves. When the timer runs out it posts with your choices so far. If it ran out while the PC slept, you get a fresh wait instead. Dropped findings never reach GitHub or later rounds; the AI's original stays in `result.ai.json`.
    - On your own PR it always posts a Comment, because GitHub does not allow approving or requesting changes there.
    - Findings on lines in the diff become inline comments; the rest are listed in the review body.
    - It posts nothing if the PR was closed or merged, has a newer commit, or no longer requests your review.
@@ -140,12 +149,13 @@ GitHub allows one pending review per person per PR. While you have one on a PR (
 
 Reviews posted before M6 have no finding markers; round two then matches your comments by file and line.
 
-Job states: `queued → preparing → reviewing → reviewed → posting → done`, or `skipped` / `failed`. A failed post retries as `reviewed` without running Claude again. Jobs interrupted by a crash or shutdown resume where they stopped.
+Job states: `queued → preparing → reviewing → reviewed → posting → done`, or `skipped` / `failed`. A review that would request changes goes `posting → held` and waits for your OK, then back to `posting`. A failed post retries as `reviewed` without running Claude again. Jobs interrupted by a crash or shutdown resume where they stopped.
 
 ### Review output
 | File | Contents |
 |---|---|
 | `review.md` | Readable summary and findings, most severe first |
+| `result.ai.json` | The AI's review before you dropped findings; only when you dropped some |
 | `review-payload.json` | Exactly what was sent to GitHub |
 | `posted.json` | GitHub review id, URL, state, and the thread of each inline finding |
 | `result.json` | Parsed review, cost, duration, turns, session id |
