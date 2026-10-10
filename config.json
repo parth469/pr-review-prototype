@@ -6,6 +6,7 @@
   },
   "skipDrafts": false,
   "skipOwnPrs": true,
+  "skipBranches": ["staging", "dev", "cycle-*"],
   "maxChangedLines": 10000,
   "dataDir": "data",
   "logLevel": "info",

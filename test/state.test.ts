@@ -459,6 +459,23 @@ describe("state", () => {
       waiting_since: null,
     });
     expect(upgraded.claimNext()?.pr).toBe(1);
+    expect(upgraded.getTicket("acme/api", 1)).toBeUndefined();
     upgraded.close();
+  });
+
+  it("keeps one ticket per PR until it is cleared", () => {
+    const state = openState(join(mkdtempSync(join(tmpdir(), "proxy-state-")), "state.db"));
+    const ticket = {
+      tickets: [{ id: "ACME-1", title: "t", url: "u", description: "d", templateOnly: false }],
+      truncated: false,
+    };
+    state.saveTicket("acme/api", 1, ticket, new Date());
+    state.saveTicket("acme/api", 1, { ...ticket, truncated: true }, new Date());
+    expect(state.getTicket("acme/api", 1)).toEqual({ ...ticket, truncated: true });
+    expect(state.getTicket("acme/api", 2)).toBeUndefined();
+    expect(state.clearTicket("acme/api", 1)).toBe(true);
+    expect(state.clearTicket("acme/api", 1)).toBe(false);
+    expect(state.getTicket("acme/api", 1)).toBeUndefined();
+    state.close();
   });
 });

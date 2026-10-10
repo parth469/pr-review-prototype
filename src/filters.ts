@@ -12,6 +12,14 @@ export function matchesRepo(pattern: string, repo: string): boolean {
   return p === r;
 }
 
+/** Patterns: an exact branch name or a prefix ending in "*". Case-insensitive. */
+export function matchesBranch(pattern: string, ref: string): boolean {
+  const p = pattern.toLowerCase();
+  const r = ref.toLowerCase();
+  if (p.endsWith("*")) return r.startsWith(p.slice(0, -1));
+  return p === r;
+}
+
 export function decide(pr: PullRequest, config: Config, viewer: string): Decision {
   const { allow, deny } = config.repos;
   if (deny.some((p) => matchesRepo(p, pr.repo))) {
@@ -19,6 +27,9 @@ export function decide(pr: PullRequest, config: Config, viewer: string): Decisio
   }
   if (!allow.some((p) => matchesRepo(p, pr.repo))) {
     return { action: "skip", reason: "repo not allowed" };
+  }
+  if (config.skipBranches.some((p) => matchesBranch(p, pr.headRef))) {
+    return { action: "skip", reason: `release branch (${pr.headRef})` };
   }
   if (config.skipDrafts && pr.draft) {
     return { action: "skip", reason: "draft" };

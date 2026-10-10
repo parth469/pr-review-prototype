@@ -15,6 +15,7 @@ export function makePr(overrides: Partial<PullRequest> = {}): PullRequest {
     url: "https://github.com/acme/api/pull/128",
     author: "teammate",
     headSha: "3f9c2e1aabbccddeeff00112233445566778899a",
+    headRef: "teammate/session-refresh",
     baseRef: "main",
     baseSha: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
     draft: false,

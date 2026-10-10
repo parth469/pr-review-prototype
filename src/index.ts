@@ -108,6 +108,7 @@ try {
     pluginPath: getPluginPath,
     isPostingPaused: () => isPostingPaused(state),
     followUp: { source: github, run: createFollowUpReviewer(), viewer },
+    ticketSource: github,
     findPendingReview: (job) => (github as GitHub).findPendingReview(job.repo, job.pr, viewer),
     wakeWatch,
     onEvent: (event) => {

@@ -29,6 +29,7 @@ import {
 } from "./runtime.ts";
 import { type Job, STOPPED_REASON, type State } from "./state.ts";
 import { type PluginId, STYLE_SPECS } from "./styles.ts";
+import { type LoadTicketDeps, loadTicket, type TicketContext, ticketNote } from "./ticket.ts";
 import type { FollowUpSource, PostedReview } from "./types.ts";
 import { HeadMovedError, type PreparedWorkspace, type Workspace } from "./workspace.ts";
 
@@ -46,6 +47,8 @@ export interface WorkerDeps {
   onEvent?: (event: WorkerEvent) => void;
   /** While true, reviews still run but wait as `reviewed` instead of being posted. */
   isPostingPaused?: () => boolean;
+  /** Where the PR's Linear ticket is read from. Without it reviews run without a ticket. */
+  ticketSource?: LoadTicketDeps["source"];
   /** Round two and later. Without it every commit gets a first review. */
   followUp?: { source: FollowUpSource; run: RunFollowUp; viewer: string };
   /**
@@ -168,6 +171,16 @@ export function createWorker(deps: WorkerDeps): Worker {
     return { context: plan.context };
   }
 
+  /** The PR's ticket, saved from an earlier round or read now. Round 1 checks against it. */
+  async function readTicket(prepared: PreparedWorkspace): Promise<TicketContext | undefined> {
+    if (!config.ticket.enabled || !deps.ticketSource) return undefined;
+    return loadTicket(
+      { source: deps.ticketSource, store: state, log, now },
+      prepared.pr,
+      config.ticket.maxChars,
+    );
+  }
+
   /** Check out, run Claude, save outputs. Returns the run, or undefined if the job stopped. */
   async function review(
     queued: Job,
@@ -189,6 +202,7 @@ export function createWorker(deps: WorkerDeps): Worker {
       stopper.signal.throwIfAborted();
       state.setStatus(job.id, "reviewing");
       const { context, carried = [], nextId = 1 } = await planFollowUp(job, prepared, fields);
+      const ticket = await readTicket(prepared);
 
       const outDir = resolve(config.reviewsDir, prepared.slug);
       await mkdir(outDir, { recursive: true });
@@ -198,6 +212,7 @@ export function createWorker(deps: WorkerDeps): Worker {
         number: job.pr,
         sha: job.head_sha,
         baseRef: prepared.pr.baseRef,
+        ticketNote: config.ticket.enabled ? ticketNote(ticket, job.round) : "",
       };
       const prompt = context
         ? await loadPrompt(style.followUpPrompt, {
@@ -215,6 +230,12 @@ export function createWorker(deps: WorkerDeps): Worker {
         writeFile(join(outDir, "prompt.md"), prompt),
         writeFile(join(outDir, "diff.patch"), prepared.diff),
         writeFile(join(outDir, "pr.json"), json(prepared.pr)),
+        ...(ticket
+          ? [
+              writeFile(join(outDir, "ticket.json"), json(ticket)),
+              writeFile(join(prepared.dir, ".review", "ticket.json"), json(ticket)),
+            ]
+          : []),
         ...inputs.map(async (name) =>
           writeFile(join(outDir, name), await readFile(join(prepared?.dir ?? "", ".review", name))),
         ),
@@ -225,6 +246,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...fields,
           round: job.round,
           followUp: Boolean(context),
+          ticket: ticket?.tickets.map((t) => t.id).join(",") ?? null,
           model: settings.model,
           effort: settings.effort,
           style: settings.style,
