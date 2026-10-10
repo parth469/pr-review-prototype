@@ -384,6 +384,22 @@ function findingRow(f, job) {
     el("details", {}, [el("summary", { text: "Why I think so" }), richText("p", f.why, "why")]),
   ]));
 }
+// The PR's Linear ticket, as round 1 checked it; or that none was found.
+function ticketLine(job, ticket, run) {
+  if (!ticket) return el("p", { class: "meta", text: run ? "No ticket found: checked for code problems only." : "No ticket read yet." });
+  var items = ticket.tickets.map(function (t) {
+    var note = t.templateOnly ? " (title only)" : "";
+    return el("span", {}, [el("a", { href: t.url, target: "_blank", rel: "noopener", text: t.id + " ↗" }), document.createTextNode(" " + t.title + note)]);
+  });
+  var refresh = el("button", { type: "button", text: "Refresh ticket", title: "Read the ticket again from Linear's comment on the next review. Only round 1 checks the code against it." });
+  refresh.addEventListener("click", function () {
+    refresh.disabled = true;
+    api("/api/jobs/" + job.id + "/refresh-ticket", true)
+      .then(function () { toast("Ticket will be read again on the next review."); select(job.id); })
+      .catch(function (err) { toast(err.message); refresh.disabled = false; });
+  });
+  return el("p", { class: "meta" }, [el("span", { text: "Ticket:" })].concat(items, ticket.truncated ? [el("span", { text: "(cut to fit)" })] : [], [refresh]));
+}
 function renderDetail(data) {
   var job = data.job, run = data.review, d = describe(job);
   var parts = [
@@ -399,6 +415,7 @@ function renderDetail(data) {
     actionsFor(job).length ? el("div", { class: "actions" }, actionsFor(job).map(function (a) { return actionButton(job, a); })) : null
   ];
   if (job.error) parts.push(el("p", { class: "summary", text: "Error: " + job.error }));
+  if (data.ticket !== undefined) parts.push(ticketLine(job, data.ticket, run));
   if (job.status === "held") parts.push(el("p", { class: "summary", text: "This would request changes. Drop the findings you disagree with, then press Post. Untouched findings post as written." + (job.hold_until ? " If you do nothing, it posts at " + time(job.hold_until) + "." : "") }));
   if (run) {
     parts.push(richText("p", run.review.summary, "summary"));

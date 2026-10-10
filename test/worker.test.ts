@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -366,5 +366,49 @@ describe("worker", () => {
     await worker.processOne();
     expect(await worker.processOne()).toBeUndefined();
     expect(await worker.drain()).toBe(0);
+  });
+
+  it("gives Claude the PR's Linear ticket and saves it for later rounds", async () => {
+    mkdirSync(join(root, "work", ".review"), { recursive: true });
+    const linkback = [
+      "<!-- linear-linkback -->",
+      "<details>",
+      '<summary><a href="https://linear.app/acme/issue/ACME-12/x">ACME-12 Session refresh</a></summary>',
+      "<p>",
+      "",
+      "Refresh the session a minute before it expires, so nobody is logged out mid-edit.",
+      "</p>",
+      "</details>",
+    ].join("\n");
+    let reads = 0;
+    const prompts: string[] = [];
+    const review = countingReview();
+    const worker = createWorker({
+      state,
+      workspace: fakeWorkspace(root),
+      runReview: async (input: RunReviewInput) => {
+        prompts.push(input.prompt);
+        return review(input);
+      },
+      publisher: fakePublisher([posted]),
+      config: parseConfig({ reviewsDir: join(root, "reviews") }),
+      log: silentLog,
+      pluginPath: async (plugin) => `/plugins/${plugin}`,
+      ticketSource: {
+        listIssueComments: async () => {
+          reads++;
+          return [{ author: "linear-code[bot]", body: linkback, createdAt: "" }];
+        },
+      },
+    });
+
+    await worker.processOne();
+    expect(prompts[0]).toContain("Check the change against it");
+    const out = join(root, "reviews", "acme-api-128-3f9c2e1");
+    const saved = JSON.parse(readFileSync(join(out, "ticket.json"), "utf8"));
+    expect(saved.tickets[0]).toMatchObject({ id: "ACME-12", templateOnly: false });
+    expect(existsSync(join(root, "work", ".review", "ticket.json"))).toBe(true);
+    expect(state.getTicket(pr.repo, pr.number)).toEqual(saved);
+    expect(reads).toBe(1);
   });
 });

@@ -156,6 +156,12 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
       case "review-now":
         after = state.resetJob(job.id, "queued", ["skipped"]);
         break;
+      // Forget the PR's saved ticket: the next review reads it from Linear's comment again.
+      case "refresh-ticket":
+        if (!state.clearTicket(job.repo, job.pr))
+          throw new HttpError(409, "No saved ticket to refresh");
+        log.info({ job: job.id, repo: job.repo, pr: job.pr, action }, "status page action");
+        return job;
       case "stop":
         // The worker skips the job once Claude has stopped, a moment later.
         if (!worker.stop(job.id)) throw new HttpError(409, "That review is not running any more");
@@ -298,7 +304,12 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
     const jobPath = /^\/api\/jobs\/([^/]+)$/.exec(path);
     if (jobPath?.[1]) {
       const job = jobOr404(jobPath[1]);
-      return sendJson(res, 200, { job, review: await readSavedReview(job) });
+      return sendJson(res, 200, {
+        job,
+        review: await readSavedReview(job),
+        // Left out when tickets are off, so the page shows nothing about them.
+        ticket: config.ticket.enabled ? (state.getTicket(job.repo, job.pr) ?? null) : undefined,
+      });
     }
     throw new HttpError(404, "Not found");
   }

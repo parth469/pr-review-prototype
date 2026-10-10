@@ -7,6 +7,8 @@ export interface PullRequest {
   url: string;
   author: string;
   headSha: string;
+  /** The PR's own branch, e.g. "parth/kgit-1316-…". */
+  headRef: string;
   baseRef: string;
   baseSha: string;
   draft: boolean;

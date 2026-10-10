@@ -11,6 +11,7 @@ describe("config", () => {
       repos: { allow: ["*"], deny: [] },
       skipDrafts: true,
       skipOwnPrs: true,
+      skipBranches: [],
       maxChangedLines: 3000,
       dataDir: "data",
       cacheDir: "cache",
@@ -41,6 +42,7 @@ describe("config", () => {
         freshReviewOverLines: 1000,
         resolveThreads: true,
       },
+      ticket: { enabled: true, maxChars: 8000 },
       statusPage: { enabled: true, port: 4777 },
       notify: { enabled: true, onPosted: true, onFailed: true, onHeld: true },
     });
@@ -56,11 +58,12 @@ describe("config", () => {
     expect(() => parseConfig({ review: { effort: "max" } })).toThrow(/effort/);
   });
 
-  it("matches the committed config.json: defaults, limited to Axy-K-Git, drafts and big PRs in", async () => {
+  it("matches the committed config.json: defaults, limited to Axy-K-Git, drafts and big PRs in, release branches out", async () => {
     expect(await loadConfig("config.json")).toEqual(
       parseConfig({
         repos: { allow: ["Axy-Science/Axy-K-Git"], deny: [] },
         skipDrafts: false,
+        skipBranches: ["staging", "dev", "cycle-*"],
         maxChangedLines: 10000,
       }),
     );

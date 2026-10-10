@@ -26,6 +26,8 @@ export const configSchema = z.object({
     .prefault({}),
   skipDrafts: z.boolean().default(true),
   skipOwnPrs: z.boolean().default(true),
+  // Head branches never reviewed, e.g. release merges: exact names or a trailing "*".
+  skipBranches: z.array(z.string().min(1)).default([]),
   maxChangedLines: z.number().int().positive().default(3000),
   dataDir: z.string().min(1).default("data"),
   cacheDir: z.string().min(1).default("cache"),
@@ -78,6 +80,14 @@ export const configSchema = z.object({
       // A push this big since the last review gets a fresh full review instead.
       freshReviewOverLines: z.number().int().positive().default(1000),
       resolveThreads: z.boolean().default(true),
+    })
+    .prefault({}),
+  ticket: z
+    .object({
+      // Check round 1 against the PR's Linear ticket, read from Linear's comment on the PR.
+      enabled: z.boolean().default(true),
+      // The ticket text given to Claude is cut down to this many characters (about 2,000 tokens).
+      maxChars: z.number().int().min(500).default(8000),
     })
     .prefault({}),
   statusPage: z

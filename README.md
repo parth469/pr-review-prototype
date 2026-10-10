@@ -75,6 +75,7 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `repos.deny` | `[]` | Repos never reviewed; beats `allow` |
 | `skipDrafts` | `true` | Ignore draft PRs |
 | `skipOwnPrs` | `true` | Ignore PRs you authored |
+| `skipBranches` | `[]` | Head branches never reviewed, e.g. release merges: exact names or a prefix ending in `*`, any case. This repo's `config.json` skips `staging`, `dev` and `cycle-*` |
 | `maxChangedLines` | `3000` | Skip PRs with more added + deleted lines |
 | `dataDir` | `data` | Where `state.db` lives |
 | `cacheDir` | `cache` | Partial clones, reused between reviews |
@@ -109,6 +110,8 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `followUp.maxAutoRounds` | `3` | Later rounds are only posted as a draft for you |
 | `followUp.freshReviewOverLines` | `1000` | A push this big since the last review (counting only files in the PR) gets a full review instead. Earlier open bugs and risks are listed in it and checked next round |
 | `followUp.resolveThreads` | `true` | Resolve threads whose finding is fixed, explained or gone |
+| `ticket.enabled` | `true` | Give Claude the PR's Linear ticket and check round 1 against it (see Ticket context) |
+| `ticket.maxChars` | `8000` | The ticket text is cut down to this many characters, about 2,000 tokens |
 
 ## How it works
 1. **Detect.** Searches GitHub for `is:pr is:open user-review-requested:@me archived:false` (direct requests only), applies the skip rules and records `(repo, pr, head_sha)` in `data/state.db`. The same commit is only handled once, even across restarts. A newer push supersedes an older commit that is still waiting.
@@ -123,6 +126,14 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
    - It posts nothing if the PR was closed or merged, has a newer commit, or no longer requests your review.
    - A hidden marker in the body means a restart or retry finds the earlier review instead of posting a second one.
    - If GitHub rejects an inline comment position, it posts again with every finding in the body.
+
+### Ticket context
+Claude also gets the Linear ticket the PR is for, so a change the ticket asked for isn't called wrong (issue #3).
+- **Where from.** Linear's GitHub app comments on every PR linked to an issue, with each issue's title and description. That comment is read; no Linear key is needed. It needs linkbacks turned on in Linear's GitHub settings. With several linked tickets, the one in the branch name (`parth/kgit-1316-…`) comes first.
+- **Cleaned.** Lines still equal to the unfilled KGIT Bug, Story or Task template are removed. A ticket that was only the template gives its title alone. Long tickets are cut to `ticket.maxChars`, key sections (goal, acceptance criteria, scope) first.
+- **Read once.** Saved per PR in `state.db` and reused every round, so each round sees the same text. With no ticket found, the next round looks again. **Refresh ticket** on the status page reads it again on the next review.
+- **Round 1 only.** Round 1 checks the code against the ticket: a contradiction becomes a ❓ question, never a blocker, and things the ticket asks for that this PR doesn't touch are not reported (tickets are often split across PRs). Later rounds use it only as background.
+- **No ticket.** Claude reviews the code for problems only. The status page says "No ticket found"; nothing about it goes to GitHub.
 
 ### Follow-up review (round 2+)
 When a new commit comes in on a PR whose earlier review is on GitHub, the job becomes a follow-up (R2, R3... on the status page).
@@ -161,6 +172,7 @@ Job states: `queued → preparing → reviewing → reviewed → posting → don
 | `result.json` | Parsed review, cost, duration, turns, session id |
 | `transcript.jsonl` | Every message from the Claude run |
 | `prompt.md`, `diff.patch`, `pr.json` | Exactly what Claude was given |
+| `ticket.json` | The PR's ticket as Claude got it; only when one was found |
 | `previous.json`, `threads.json`, `since-last.patch` | Follow-ups only: the earlier findings, replies and changes Claude checked |
 
 ### Safety

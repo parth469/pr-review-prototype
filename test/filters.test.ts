@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.ts";
-import { decide, matchesRepo } from "../src/filters.ts";
+import { decide, matchesBranch, matchesRepo } from "../src/filters.ts";
 import { defaultConfig, makePr } from "./helpers.ts";
 
 describe("matchesRepo", () => {
@@ -13,6 +13,19 @@ describe("matchesRepo", () => {
     ["acme/api", "acme/web", false],
   ])("%s vs %s -> %s", (pattern, repo, expected) => {
     expect(matchesRepo(pattern, repo)).toBe(expected);
+  });
+});
+
+describe("matchesBranch", () => {
+  it.each([
+    ["staging", "staging", true],
+    ["staging", "staging-fix", false],
+    ["cycle-*", "cycle-14", true],
+    ["Cycle-*", "cycle-14", true],
+    ["cycle-*", "parth/cycle-14", false],
+    ["dev", "Dev", true],
+  ])("%s vs %s -> %s", (pattern, ref, expected) => {
+    expect(matchesBranch(pattern, ref)).toBe(expected);
   });
 });
 
@@ -29,6 +42,20 @@ describe("decide", () => {
   it("skips repos outside the allowlist", () => {
     const config = parseConfig({ repos: { allow: ["other/*"] } });
     expect(decide(makePr(), config, "me")).toEqual({ action: "skip", reason: "repo not allowed" });
+  });
+
+  it("skips release branches listed in skipBranches", () => {
+    const config = parseConfig({ skipBranches: ["staging", "cycle-*"] });
+    expect(decide(makePr({ headRef: "cycle-14" }), config, "me")).toEqual({
+      action: "skip",
+      reason: "release branch (cycle-14)",
+    });
+    expect(decide(makePr({ headRef: "parth/kgit-1-fix" }), config, "me")).toEqual({
+      action: "queue",
+    });
+    expect(decide(makePr({ headRef: "staging" }), defaultConfig, "me")).toEqual({
+      action: "queue",
+    });
   });
 
   it("skips drafts unless disabled", () => {

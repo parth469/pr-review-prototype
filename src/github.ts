@@ -158,6 +158,7 @@ export function createGitHub(token: string, log: Logger): GitHub {
         url: data.html_url,
         author: data.user.login,
         headSha: data.head.sha,
+        headRef: data.head.ref,
         baseRef: data.base.ref,
         baseSha: data.base.sha,
         draft: data.draft ?? false,

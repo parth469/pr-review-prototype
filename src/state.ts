@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Decision } from "./filters.ts";
+import type { TicketContext, TicketStore } from "./ticket.ts";
 
 export type JobStatus =
   | "queued"
@@ -106,6 +107,13 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE jobs ADD COLUMN hold_until TEXT;
    ALTER TABLE jobs ADD COLUMN released TEXT;
    ALTER TABLE jobs ADD COLUMN dropped TEXT;`,
+  `CREATE TABLE tickets (
+     repo       TEXT    NOT NULL,
+     pr         INTEGER NOT NULL,
+     data       TEXT    NOT NULL,
+     fetched_at TEXT    NOT NULL,
+     PRIMARY KEY (repo, pr)
+   );`,
 ];
 
 export interface PublishOutcome {
@@ -140,7 +148,7 @@ export const HELD_REASON = "needs your OK";
 /** Skip reason for a held review you discarded. */
 export const DISCARDED_REASON = "discarded by you";
 
-export interface State {
+export interface State extends TicketStore {
   recordSeen(input: SeenInput): SeenResult;
   /** Queue a PR commit by hand, ignoring skip rules. Resets a finished or failed job. */
   enqueue(input: Omit<SeenInput, "decision">): Job;
@@ -209,6 +217,8 @@ export interface State {
   resetJob(id: number, to: "queued" | "reviewed", from: JobStatus[]): Job | undefined;
   getSetting(key: string): string | undefined;
   setSetting(key: string, value: string): void;
+  /** Forget a PR's saved ticket, so the next review reads it again. False if none was saved. */
+  clearTicket(repo: string, pr: number): boolean;
   close(): void;
 }
 
@@ -294,6 +304,12 @@ export function openState(path: string): State {
     "UPDATE jobs SET dropped = ?, updated_at = ? WHERE id = ? AND status = 'held'",
   );
   const selectRecent = db.prepare("SELECT * FROM jobs ORDER BY updated_at DESC, id DESC LIMIT ?");
+  const readTicket = db.prepare("SELECT data FROM tickets WHERE repo = ? AND pr = ?");
+  const writeTicket = db.prepare(
+    `INSERT INTO tickets (repo, pr, data, fetched_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (repo, pr) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at`,
+  );
+  const deleteTicket = db.prepare("DELETE FROM tickets WHERE repo = ? AND pr = ?");
   const readSetting = db.prepare("SELECT value FROM settings WHERE key = ?");
   const writeSetting = db.prepare(
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -518,6 +534,19 @@ export function openState(path: string): State {
 
     setSetting(key, value) {
       writeSetting.run(key, value);
+    },
+
+    getTicket(repo, pr) {
+      const row = readTicket.get(repo, pr) as { data: string } | undefined;
+      return row ? (JSON.parse(row.data) as TicketContext) : undefined;
+    },
+
+    saveTicket(repo, pr, ticket, now) {
+      writeTicket.run(repo, pr, JSON.stringify(ticket), iso(now));
+    },
+
+    clearTicket(repo, pr) {
+      return deleteTicket.run(repo, pr).changes > 0;
     },
 
     close() {

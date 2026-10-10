@@ -201,6 +201,31 @@ describe("status server", () => {
     expect((await stop()).status).toBe(409);
   });
 
+  it("shows the PR's saved ticket and forgets it on Refresh ticket", async () => {
+    seed(1);
+    const job = state.claimNext();
+    if (!job) throw new Error("no job");
+    const detail = async () =>
+      JSON.parse((await call(server.port, `/api/jobs/${job.id}`)).body) as { ticket: unknown };
+    expect((await detail()).ticket).toBeNull();
+
+    const ticket = {
+      tickets: [{ id: "ACME-1", title: "t", url: "u", description: "d", templateOnly: false }],
+      truncated: false,
+    };
+    state.saveTicket("acme/api", 1, ticket, new Date());
+    expect((await detail()).ticket).toEqual(ticket);
+
+    const refresh = () =>
+      call(server.port, `/api/jobs/${job.id}/refresh-ticket`, {
+        method: "POST",
+        token: server.token,
+      });
+    expect((await refresh()).status).toBe(200);
+    expect(state.getTicket("acme/api", 1)).toBeUndefined();
+    expect((await refresh()).status).toBe(409);
+  });
+
   it("approves a posted re-requested review, and nothing else", async () => {
     // Round 1, posted as a request for changes.
     seed(1);
