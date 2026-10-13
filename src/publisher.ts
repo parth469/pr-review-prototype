@@ -181,6 +181,7 @@ export function createPublisher({
         commentable,
         noInline,
         ...(run.carried ? { carried: run.carried } : {}),
+        ...(run.tickets ? { tickets: run.tickets } : {}),
       });
     const toPayload = (draft: ReviewDraft): CreateReviewPayload => ({
       commit_id: job.head_sha,

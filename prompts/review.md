@@ -29,4 +29,7 @@ risk (an edge case, a missing guard that is unlikely to matter), a nit or a ques
 Grade honestly: from the second round on, only `mustFix` findings block approval.
 Report every problem you find in this one review, so the author can fix everything in a single
 round. Do not hold anything back for later.
+In `checked`, list in plain English what you looked at, by what it does (for example "Edge
+create, update and merge in graph-api"), 3 to 6 short lines. If something mattered but you
+could not check it (production data, another service), add a line starting "Not checked:".
 If you find nothing worth changing, return verdict "no_issues" with an empty findings list.

@@ -17,6 +17,7 @@ import { defaultConfig } from "./helpers.ts";
 
 const sampleReview = {
   summary: "Token check is unsafe.",
+  checked: ["Login token check"],
   verdict: "request_changes",
   findings: [
     {
@@ -73,7 +74,7 @@ describe("reviewJsonSchema", () => {
     expect(reviewJsonSchema).not.toHaveProperty("$schema");
     expect(reviewJsonSchema).toMatchObject({
       type: "object",
-      required: ["summary", "verdict", "findings"],
+      required: ["summary", "checked", "verdict", "findings"],
     });
   });
 });

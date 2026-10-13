@@ -140,6 +140,34 @@ describe("buildReview", () => {
     expect(draft.body).toContain("does not allow approving or requesting changes on your own PR");
   });
 
+  it("opens with the ticket, what was checked and the counts, not the summary", () => {
+    const draft = buildReview({
+      review: {
+        ...review([f("bug", 5), f("nit", 6)]),
+        checked: ["Login flow", "Not checked: production data"],
+      },
+      pr,
+      viewer: "me",
+      commentable,
+      tickets: [{ id: "KGIT-1", title: "Fix login", url: "https://linear.app/x/issue/KGIT-1" }],
+    });
+    const head = [
+      "**Ticket:** [KGIT-1](https://linear.app/x/issue/KGIT-1) · Fix login",
+      "**What I checked**",
+      "- Login flow\n- Not checked: production data",
+      "**1 bug · 1 nit**",
+    ].join("\n\n");
+    expect(draft.body.slice(0, head.length)).toBe(head);
+    expect(draft.body).not.toContain("Summary here.");
+  });
+
+  it("falls back to the summary for a review saved before checked existed", () => {
+    const draft = buildReview({ review: review([]), pr, viewer: "me", commentable });
+    expect(draft.body).toContain("Summary here.");
+    expect(draft.body).toContain("**No problems found.**");
+    expect(draft.body).not.toContain("Ticket:");
+  });
+
   it("keeps the marker even when the body is trimmed", () => {
     const huge = { ...review([]), summary: "x".repeat(70_000) };
     const draft = buildReview({ review: huge, pr, viewer: "me", commentable });

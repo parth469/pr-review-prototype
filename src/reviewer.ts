@@ -13,6 +13,7 @@ import type { Config, Style } from "./config.ts";
 import type { FollowUpResult, LedgerEntry } from "./followup.ts";
 import type { SessionUsage } from "./runtime.ts";
 import { STYLE_SPECS } from "./styles.ts";
+import type { Ticket } from "./ticket.ts";
 
 export const findingSchema = z.object({
   path: z.string().min(1).describe("File path relative to the repository root"),
@@ -65,6 +66,11 @@ export const classicFindingSchema = findingSchema
 const reviewShape = <F extends z.ZodType>(finding: F) =>
   z.object({
     summary: z.string().min(1).describe("2-4 sentence overview of the PR and the main problems"),
+    checked: z
+      .array(z.string().min(1))
+      .describe(
+        '3-6 short plain-English lines of what you checked, by what it does for users, not file names. Add a line starting "Not checked:" for anything that mattered but you could not check',
+      ),
     verdict: z.enum(["request_changes", "no_issues"]),
     findings: z.array(finding),
   });
@@ -87,7 +93,11 @@ export type Finding = Omit<z.infer<typeof findingSchema>, "mustFix" | FindingTex
 export const mustFix = (f: Pick<Finding, "severity" | "mustFix">) =>
   f.severity === "bug" || (f.severity === "risk" && f.mustFix === true);
 
-export type Review = Omit<z.infer<typeof reviewSchema>, "findings"> & { findings: Finding[] };
+// checked is optional: reviews saved before it have none.
+export type Review = Omit<z.infer<typeof reviewSchema>, "findings" | "checked"> & {
+  findings: Finding[];
+  checked?: string[];
+};
 
 export const VERDICTS = [
   "fixed",
@@ -192,6 +202,8 @@ export interface ReviewRun extends RunStats {
   carried?: LedgerEntry[];
   /** How the findings were written. Missing on reviews saved before styles existed. */
   style?: Style;
+  /** The PR's tickets, named at the top of the posted review. */
+  tickets?: Array<Pick<Ticket, "id" | "title" | "url">>;
 }
 
 export type FollowUpRun = RunStats & { output: FollowUpOutput };
