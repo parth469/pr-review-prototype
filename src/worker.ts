@@ -277,6 +277,9 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...first,
           review: { ...first.review, findings: numberFindings(first.review.findings, nextId) },
           ...(carried.length > 0 ? { carried } : {}),
+          ...(ticket
+            ? { tickets: ticket.tickets.map(({ id, title, url }) => ({ id, title, url })) }
+            : {}),
           style: settings.style,
         };
       }

@@ -1,7 +1,7 @@
 import { findingMarkdown, findingTitle, isStructured } from "./finding-text.ts";
 import { type FollowUpResult, findingMarker, type LedgerEntry, replyMarker } from "./followup.ts";
 import { sortFindings } from "./report.ts";
-import { type Finding, mustFix, type Review, type Verdict } from "./reviewer.ts";
+import { type Finding, mustFix, type Review, type ReviewRun, type Verdict } from "./reviewer.ts";
 import type { PullRequest, ReviewEventName } from "./types.ts";
 
 export type ReviewEvent = "REQUEST_CHANGES" | "COMMENT" | "APPROVE";
@@ -105,7 +105,8 @@ export interface BuildInput {
   /** Put every finding in the body, e.g. after GitHub rejected the inline comments. */
   noInline?: boolean;
   /** Earlier bugs and risks still open, when a full review replaced a follow-up. */
-  carried?: LedgerEntry[];
+  carried?: LedgerEntry[] /** The PR's tickets, named first. */;
+  tickets?: ReviewRun["tickets"];
 }
 
 export function buildReview({
@@ -115,6 +116,7 @@ export function buildReview({
   commentable,
   noInline = false,
   carried = [],
+  tickets = [],
 }: BuildInput): ReviewDraft {
   const comments: InlineComment[] = [];
   const outside: Finding[] = [];
@@ -146,8 +148,19 @@ export function buildReview({
   }
 
   const event = chooseEvent(review, pr, viewer, carried);
-  const parts = [review.summary];
-  if (review.findings.length > 0) parts.push(`**${countFindings(review.findings)}**`);
+  const parts: string[] = [];
+  if (tickets.length > 0) {
+    parts.push(tickets.map((t) => `**Ticket:** [${t.id}](${t.url}) · ${t.title}`).join("\n"));
+  }
+  // Reviews saved before `checked` existed fall back to the summary.
+  if (review.checked && review.checked.length > 0) {
+    parts.push(`**What I checked**\n\n${review.checked.map((c) => `- ${c}`).join("\n")}`);
+  } else {
+    parts.push(review.summary);
+  }
+  parts.push(
+    review.findings.length > 0 ? `**${countFindings(review.findings)}**` : "**No problems found.**",
+  );
   if (outside.length > 0) {
     const heading = comments.length > 0 ? "Other findings" : "Findings";
     parts.push(`### ${heading}\n\n${listFindings(outside)}`);
