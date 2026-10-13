@@ -137,7 +137,7 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 Claude also gets the Linear ticket the PR is for, so a change the ticket asked for isn't called wrong (issue #3).
 - **Where from.** Linear's GitHub app comments on every PR linked to an issue, with each issue's title and description. That comment is read; no Linear key is needed. It needs linkbacks turned on in Linear's GitHub settings. With several linked tickets, the one in the branch name (`parth/kgit-1316-…`) comes first.
 - **Cleaned.** Lines still equal to the unfilled KGIT Bug, Story or Task template are removed. A ticket that was only the template gives its title alone. Long tickets are cut to `ticket.maxChars`, key sections (goal, acceptance criteria, scope) first.
-- **Read once.** Saved per PR in `state.db` and reused every round, so each round sees the same text. With no ticket found, the next round looks again. **Refresh ticket** on the status page reads it again on the next review.
+- **Read once.** Saved per PR in `state.db` and reused every round, so each round sees the same text. With no ticket found, the next round looks again. **Refresh** next to the ticket on the status page reads it again right away; the saved one stays if none is found.
 - **Round 1 only.** Round 1 checks the code against the ticket: a contradiction becomes a ❓ question, never a blocker, and things the ticket asks for that this PR doesn't touch are not reported (tickets are often split across PRs). Later rounds use it only as background.
 - **No ticket.** Claude reviews the code for problems only. The status page says "No ticket found"; nothing about it goes to GitHub.
 

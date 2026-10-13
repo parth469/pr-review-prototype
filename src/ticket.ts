@@ -247,6 +247,20 @@ export interface LoadTicketDeps {
   now?: () => Date;
 }
 
+/** The PR's ticket read now from Linear's comment, ignoring any saved one. Throws on a failed read. */
+export async function fetchTicket(
+  source: LoadTicketDeps["source"],
+  pr: Pick<PullRequest, "repo" | "number" | "headRef">,
+  maxChars: number,
+): Promise<TicketContext | undefined> {
+  const comments = await source.listIssueComments(pr.repo, pr.number, "1970-01-01T00:00:00Z");
+  const linked = comments
+    .filter((c) => c.author.replace(/\[bot\]$/, "") === LINEAR_BOT)
+    .flatMap((c) => parseLinkback(c.body));
+  const unique = linked.filter((t, i) => linked.findIndex((u) => u.id === t.id) === i);
+  return buildTicketContext(unique, pr.headRef, maxChars);
+}
+
 /**
  * The PR's ticket: the saved one, or read now from Linear's comment and saved. Nothing is saved
  * when no ticket is found, so the next round looks again. Never throws: a review goes on without.
@@ -259,16 +273,7 @@ export async function loadTicket(
   const saved = deps.store.getTicket(pr.repo, pr.number);
   if (saved) return saved;
   try {
-    const comments = await deps.source.listIssueComments(
-      pr.repo,
-      pr.number,
-      "1970-01-01T00:00:00Z",
-    );
-    const linked = comments
-      .filter((c) => c.author.replace(/\[bot\]$/, "") === LINEAR_BOT)
-      .flatMap((c) => parseLinkback(c.body));
-    const unique = linked.filter((t, i) => linked.findIndex((u) => u.id === t.id) === i);
-    const ticket = buildTicketContext(unique, pr.headRef, maxChars);
+    const ticket = await fetchTicket(deps.source, pr, maxChars);
     if (ticket)
       deps.store.saveTicket(pr.repo, pr.number, ticket, (deps.now ?? (() => new Date()))());
     return ticket;

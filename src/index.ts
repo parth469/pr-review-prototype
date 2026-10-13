@@ -15,6 +15,7 @@ import { createRuntime, isPostingPaused, recordPoll } from "./runtime.ts";
 import { openState } from "./state.ts";
 import { BUNDLED_PLUGIN, type PluginId } from "./styles.ts";
 import { EXIT_PREFLIGHT } from "./supervisor.ts";
+import { fetchTicket } from "./ticket.ts";
 import { startStatusServer } from "./web/server.ts";
 import { createWorker } from "./worker.ts";
 import { createWorkspace } from "./workspace.ts";
@@ -180,6 +181,10 @@ try {
           worker,
           log,
           approve: (job) => approveByHand(github as GitHub, viewer, job),
+          readTicket: async (job) => {
+            const gh = github as GitHub;
+            return fetchTicket(gh, await gh.getPull(job.repo, job.pr), config.ticket.maxChars);
+          },
         })
       : undefined;
     await Promise.all([

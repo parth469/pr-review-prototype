@@ -256,9 +256,9 @@ ${
           ? html`Ticket: ${ticket.tickets.map(
               (t) =>
                 html`<a href="${safeHref(t.url)}" target="_blank" rel="noopener noreferrer" title="${t.title}">${t.id} ↗</a> `,
-            )}${ticket.truncated ? "(cut to fit) " : ""}${actionForm(chrome, `/do/jobs/${job.id}/refresh-ticket`, "Refresh", { tone: "small", title: "Read the ticket again from Linear's comment on the next review." })}`
-          : html`<span class="muted">No ticket found.</span>`
-      }</p>`
+            )}${ticket.truncated ? "(cut to fit) " : ""}`
+          : html`<span class="muted">No ticket found.</span> `
+      }${actionForm(chrome, `/do/jobs/${job.id}/refresh-ticket`, "Refresh", { tone: "small", title: "Read the ticket again from Linear's comment on the PR." })}</p>`
 }
 ${
   pr.rounds.length > 1

@@ -20,6 +20,7 @@ import {
 } from "../runtime.ts";
 import { APPROVED_BY_YOU, type Job, type JobStatus, type State } from "../state.ts";
 import { STYLE_SPECS } from "../styles.ts";
+import type { TicketContext } from "../ticket.ts";
 import type { PostedReview } from "../types.ts";
 import type { Chrome } from "./layout.ts";
 import { renderListPage } from "./list-page.ts";
@@ -34,6 +35,8 @@ export interface StatusServerDeps {
   log: Logger;
   /** Approve the job's PR on GitHub, overriding the posted review. Off when not given. */
   approve?: (job: Job) => Promise<PostedReview>;
+  /** Read the job's PR ticket from Linear's comment now. Without it Refresh only forgets it. */
+  readTicket?: (job: Job) => Promise<TicketContext | undefined>;
   /** Tests pass 0 for a free port. */
   port?: number;
 }
@@ -141,7 +144,7 @@ async function readSavedReview(job: Job): Promise<unknown> {
  * that is only in the page itself, so other websites open in your browser cannot press them.
  */
 export async function startStatusServer(deps: StatusServerDeps): Promise<StatusServer | undefined> {
-  const { state, config, runtime, worker, log, approve } = deps;
+  const { state, config, runtime, worker, log, approve, readTicket } = deps;
   const token = randomBytes(24).toString("base64url");
   let port = deps.port ?? config.statusPage.port;
 
@@ -163,7 +166,7 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
     return job;
   }
 
-  function act(job: Job, action: string): Job {
+  async function act(job: Job, action: string): Promise<Job> {
     let after: Job | undefined;
     switch (action) {
       case "retry": {
@@ -192,10 +195,8 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
       case "review-now":
         after = state.resetJob(job.id, "queued", ["skipped"]);
         break;
-      // Forget the PR's saved ticket: the next review reads it from Linear's comment again.
       case "refresh-ticket":
-        if (!state.clearTicket(job.repo, job.pr))
-          throw new HttpError(409, "No saved ticket to refresh");
+        await refreshTicket(job);
         log.info({ job: job.id, repo: job.repo, pr: job.pr, action }, "status page action");
         return job;
       case "stop":
@@ -210,6 +211,27 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
     log.info({ job: job.id, repo: job.repo, pr: job.pr, action }, "status page action");
     worker.kick();
     return after;
+  }
+
+  /**
+   * Read the PR's ticket from Linear's comment again and save it. The saved one stays when the
+   * read fails or finds none, so the page never loses a ticket it had.
+   */
+  async function refreshTicket(job: Job): Promise<void> {
+    if (!readTicket) {
+      // Forget the saved ticket: the next review reads it from Linear's comment again.
+      if (!state.clearTicket(job.repo, job.pr))
+        throw new HttpError(409, "No saved ticket to refresh");
+      return;
+    }
+    let ticket: TicketContext | undefined;
+    try {
+      ticket = await readTicket(job);
+    } catch (err) {
+      throw new HttpError(502, `Could not read the ticket: ${(err as Error).message}`);
+    }
+    if (!ticket) throw new HttpError(409, "No ticket found in Linear's comment on the PR");
+    state.saveTicket(job.repo, job.pr, ticket, new Date());
   }
 
   /** Only a re-requested review (a follow-up) that is posted and not yet an approval. */
@@ -335,7 +357,7 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         await dropFindings(job, { ids: form.get("dropped") === "1" ? [...others, id] : others });
         return;
       }
-      act(job, jobAction[2]);
+      await act(job, jobAction[2]);
       return;
     }
     if (path === "/do/posting/pause" || path === "/do/posting/resume") {
@@ -385,7 +407,7 @@ export async function startStatusServer(deps: StatusServerDeps): Promise<StatusS
         return sendJson(res, 200, await dropFindings(job, await readJsonBody(req)));
       }
       if (jobAction?.[1] && jobAction[2]) {
-        return sendJson(res, 200, act(jobOr404(jobAction[1]), jobAction[2]));
+        return sendJson(res, 200, await act(jobOr404(jobAction[1]), jobAction[2]));
       }
       if (path === "/api/posting/pause" || path === "/api/posting/resume") {
         const paused = path.endsWith("pause");

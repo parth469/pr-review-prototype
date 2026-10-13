@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.ts";
 import { createRuntime, holdMinutes, isPostingPaused } from "../src/runtime.ts";
 import { openState, type State } from "../src/state.ts";
+import type { TicketContext } from "../src/ticket.ts";
 import { type StatusServer, startStatusServer } from "../src/web/server.ts";
 import { silentLog } from "./helpers.ts";
 
@@ -60,6 +61,7 @@ describe("status server", () => {
   let kicks: number;
   let running: Set<number>;
   let approved: number[];
+  let linked: () => Promise<TicketContext | undefined>;
   let dir: string;
 
   const seed = (pr: number) =>
@@ -78,6 +80,7 @@ describe("status server", () => {
     kicks = 0;
     running = new Set();
     approved = [];
+    linked = async () => undefined;
     const started = await startStatusServer({
       state,
       config: parseConfig({}),
@@ -88,6 +91,7 @@ describe("status server", () => {
         approved.push(job.id);
         return { id: 99, url: "https://github.com/acme/api/pull/1#r99", state: "APPROVED" };
       },
+      readTicket: () => linked(),
       port: 0,
     });
     if (!started) throw new Error("server did not start");
@@ -305,7 +309,7 @@ describe("status server", () => {
     expect((await stop()).status).toBe(409);
   });
 
-  it("shows the PR's saved ticket and forgets it on Refresh ticket", async () => {
+  it("shows the PR's saved ticket and reads it again on Refresh, keeping it when none is found", async () => {
     seed(1);
     const job = state.claimNext();
     if (!job) throw new Error("no job");
@@ -313,21 +317,29 @@ describe("status server", () => {
       JSON.parse((await call(server.port, `/api/jobs/${job.id}`)).body) as { ticket: unknown };
     expect((await detail()).ticket).toBeNull();
 
-    const ticket = {
-      tickets: [{ id: "ACME-1", title: "t", url: "u", description: "d", templateOnly: false }],
+    const make = (id: string): TicketContext => ({
+      tickets: [{ id, title: "t", url: "u", description: "d", templateOnly: false }],
       truncated: false,
-    };
-    state.saveTicket("acme/api", 1, ticket, new Date());
-    expect((await detail()).ticket).toEqual(ticket);
+    });
+    state.saveTicket("acme/api", 1, make("ACME-1"), new Date());
+    expect((await detail()).ticket).toEqual(make("ACME-1"));
 
     const refresh = () =>
       call(server.port, `/api/jobs/${job.id}/refresh-ticket`, {
         method: "POST",
         token: server.token,
       });
-    expect((await refresh()).status).toBe(200);
-    expect(state.getTicket("acme/api", 1)).toBeUndefined();
+    // Linear's comment names no ticket, or GitHub fails: the saved one stays.
     expect((await refresh()).status).toBe(409);
+    linked = async () => {
+      throw new Error("boom");
+    };
+    expect((await refresh()).status).toBe(502);
+    expect(state.getTicket("acme/api", 1)).toEqual(make("ACME-1"));
+
+    linked = async () => make("ACME-2");
+    expect((await refresh()).status).toBe(200);
+    expect(state.getTicket("acme/api", 1)).toEqual(make("ACME-2"));
   });
 
   it("approves a posted re-requested review, and nothing else", async () => {
