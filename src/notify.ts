@@ -135,28 +135,48 @@ export function notificationFor(
   };
 }
 
-export type RunScript = (script: string) => Promise<void>;
+export type RunCommand = (command: string, args: string[]) => Promise<void>;
 
-const runPowerShell: RunScript = async (script) => {
-  // -EncodedCommand takes UTF-16LE base64, which sidesteps every quoting problem.
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
-    { windowsHide: true, timeout: 30_000 },
-  );
+const execRun: RunCommand = async (command, args) => {
+  await execFileAsync(command, args, { windowsHide: true, timeout: 30_000 });
 };
+
+/** notify-send (libnotify), on every desktop that ships it. */
+export function buildNotifySendArgs({ title, body }: Notification): string[] {
+  // No click-to-open, unlike Windows: notify-send has no portable click action.
+  // "--" keeps a title starting with "-" from being read as an option. Daemons render the
+  // body as markup, so a PR title with "<" or "&" is escaped.
+  const escaped = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return ["--app-name=Proxy Reviewer", "--", title, escaped];
+}
+
+function commandFor(notification: Notification): { command: string; args: string[] } | null {
+  if (process.platform === "win32") {
+    // -EncodedCommand takes UTF-16LE base64, which sidesteps every quoting problem.
+    const encoded = Buffer.from(buildToastScript(notification), "utf16le").toString("base64");
+    return {
+      command: "powershell.exe",
+      args: ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
+    };
+  }
+  if (process.platform === "linux") {
+    return { command: "notify-send", args: buildNotifySendArgs(notification) };
+  }
+  return null;
+}
 
 export function createNotifier(
   { enabled }: { enabled: boolean },
   log: Logger,
-  run: RunScript = runPowerShell,
+  run: RunCommand = execRun,
 ): Notifier {
   return {
     async notify(notification) {
-      if (!enabled || process.platform !== "win32") return;
+      if (!enabled) return;
+      const cmd = commandFor(notification);
+      if (!cmd) return;
       try {
-        await run(buildToastScript(notification));
+        await run(cmd.command, cmd.args);
       } catch (err) {
         // A missed notification must never break a review.
         log.warn({ err, title: notification.title }, "could not show notification");
