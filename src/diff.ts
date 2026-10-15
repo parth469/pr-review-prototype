@@ -120,3 +120,24 @@ export function filterPatch(patch: string, paths: Set<string>): string {
     .map((s) => s.text)
     .join("\n");
 }
+
+// Test files: a *.test / *.spec file, a test_*.py or *_test.go/.py file, or anything in a
+// test, tests, __tests__, __mocks__ or e2e folder.
+const TEST_PATH =
+  /(^|\/)(tests?|__tests__|__mocks__|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(go|py)$/;
+
+export const isTestPath = (path: string): boolean => TEST_PATH.test(path);
+
+/**
+ * The patch cut in two: code, and test files. Claude keeps whatever it reads in context for
+ * every later turn, so the tests are kept apart and read only to check them.
+ */
+export function splitTestPatch(patch: string): { code: string; tests: string } {
+  const code: string[] = [];
+  const tests: string[] = [];
+  for (const s of fileSections(patch)) {
+    const paths = [...s.paths];
+    (paths.length > 0 && paths.every(isTestPath) ? tests : code).push(s.text);
+  }
+  return { code: code.join("\n"), tests: tests.join("\n") };
+}

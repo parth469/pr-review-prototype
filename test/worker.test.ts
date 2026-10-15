@@ -180,11 +180,11 @@ describe("worker", () => {
       ["F1", "bug"],
       ["F2", "nit"],
     ]);
-    // The default style: the bundled skill and the readable-format prompt.
+    // The default style: the bundled deep skill and the readable-format prompt.
     const prompt = readFileSync(join(out, "prompt.md"), "utf8");
-    expect(prompt.startsWith("/proxy-reviewer:readable-review")).toBe(true);
+    expect(prompt.startsWith("/proxy-reviewer:deep-review")).toBe(true);
     expect(prompt).toContain("`title`, `problem`, `impact`");
-    expect(saved.style).toBe("readable");
+    expect(saved.style).toBe("deep");
     expect(ws.cleaned).toBe(1);
   });
 

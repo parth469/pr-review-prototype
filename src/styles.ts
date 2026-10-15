@@ -18,15 +18,24 @@ export interface StyleSpec {
 
 export const STYLE_SPECS: Record<Style, StyleSpec> = {
   readable: {
-    label: "New skill + new format",
+    label: "Standard review",
     skill: "proxy-reviewer:readable-review",
     plugin: "bundled",
     reviewPrompt: "prompts/review.md",
     followUpPrompt: "prompts/follow-up.md",
     structured: true,
   },
+  // Same format as "readable"; the skill makes one agent trace the ticket and the code further.
+  deep: {
+    label: "Deep review",
+    skill: "proxy-reviewer:deep-review",
+    plugin: "bundled",
+    reviewPrompt: "prompts/review.md",
+    followUpPrompt: "prompts/follow-up.md",
+    structured: true,
+  },
   "caveman-readable": {
-    label: "Caveman + new format",
+    label: "Caveman review",
     skill: "caveman:caveman-review",
     plugin: "caveman",
     reviewPrompt: "prompts/review.md",
@@ -34,7 +43,7 @@ export const STYLE_SPECS: Record<Style, StyleSpec> = {
     structured: true,
   },
   "caveman-classic": {
-    label: "Caveman + old format",
+    label: "Caveman, old format",
     skill: "caveman:caveman-review",
     plugin: "caveman",
     reviewPrompt: "prompts/review-classic.md",

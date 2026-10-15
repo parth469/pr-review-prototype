@@ -46,7 +46,7 @@ function fakeQuery(
   }) as unknown as typeof query;
 }
 
-const READABLE = "proxy-reviewer:readable-review";
+const DEEP = "proxy-reviewer:deep-review";
 const init = (skills: string[]) => ({ type: "system", subtype: "init", skills });
 const success = (structured_output: unknown) => ({
   type: "result",
@@ -62,7 +62,7 @@ function input(): RunReviewInput {
   const dir = mkdtempSync(join(tmpdir(), "proxy-reviewer-"));
   return {
     cwd: dir,
-    prompt: "/proxy-reviewer:readable-review ...",
+    prompt: "/proxy-reviewer:deep-review ...",
     settings: defaultConfig.review,
     pluginPath: "/plugins/caveman",
     transcriptPath: join(dir, "transcript.jsonl"),
@@ -95,7 +95,7 @@ describe("reviewSchema", () => {
 describe("createReviewer", () => {
   it("runs locked down and returns the parsed review", async () => {
     const seen: { options?: Options | undefined } = {};
-    const run = createReviewer(fakeQuery([init([READABLE]), success(sampleReview)], seen));
+    const run = createReviewer(fakeQuery([init([DEEP]), success(sampleReview)], seen));
     const args = input();
     const result = await run(args);
 
@@ -117,13 +117,13 @@ describe("createReviewer", () => {
 
   it("fails when the skill did not load", async () => {
     const run = createReviewer(fakeQuery([init(["other:skill"]), success(sampleReview)]));
-    await expect(run(input())).rejects.toThrow(/proxy-reviewer:readable-review did not load/);
+    await expect(run(input())).rejects.toThrow(/proxy-reviewer:deep-review did not load/);
   });
 
   it("fails on an error result", async () => {
     const run = createReviewer(
       fakeQuery([
-        init([READABLE]),
+        init([DEEP]),
         { type: "result", subtype: "error_max_turns", errors: ["too many turns"] },
       ]),
     );
@@ -155,12 +155,12 @@ describe("createReviewer", () => {
     );
     await expect(wrong(args)).rejects.toThrow(/wrong shape/);
     await expect(
-      createReviewer(fakeQuery([init([READABLE]), success(classic)]))(input()),
+      createReviewer(fakeQuery([init([DEEP]), success(classic)]))(input()),
     ).rejects.toThrow(/wrong shape/);
   });
 
   it("fails when the output has the wrong shape", async () => {
-    const run = createReviewer(fakeQuery([init([READABLE]), success({ summary: "x" })]));
+    const run = createReviewer(fakeQuery([init([DEEP]), success({ summary: "x" })]));
     await expect(run(input())).rejects.toThrow(/wrong shape/);
   });
 });
@@ -193,7 +193,7 @@ describe("session usage", () => {
 
   it("reports it during a run", async () => {
     const seen: number[] = [];
-    await createReviewer(fakeQuery([init([READABLE]), event, success(sampleReview)]))({
+    await createReviewer(fakeQuery([init([DEEP]), event, success(sampleReview)]))({
       ...input(),
       onUsage: (u) => seen.push(u.utilization),
     });

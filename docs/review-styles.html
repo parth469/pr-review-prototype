@@ -161,9 +161,10 @@ td code{white-space:nowrap}
   <h1>Review styles: findings a person can judge and an AI can fix</h1>
   <p class="lede">Posted review comments were accurate but hard to judge: a person could not tell quickly why the reviewer asked for a change, or whether it was real. Findings now come in plain-word parts with the evidence folded underneath, and you can pick how reviews are written on the status page. This page records what we found, what we tried, what it costs, and what we picked.</p>
   <div class="meta">
-    <span class="chip ok">default: New skill + new format</span>
-    <span class="chip">Caveman + new format</span>
-    <span class="chip">Caveman + old format</span>
+    <span class="chip ok">default: Deep review</span>
+    <span class="chip">Standard review</span>
+    <span class="chip">Caveman review</span>
+    <span class="chip">Caveman, old format</span>
     <span class="chip accent">pick on the status page</span>
   </div>
 </header>
@@ -234,17 +235,33 @@ td code{white-space:nowrap}
 </section>
 
 <section id="styles">
-  <h2><span class="n">04</span>The three styles</h2>
-  <p class="sub">A style decides the skill, the plugin, the prompts and the output shape. Only the chosen style's plugin is loaded into a review.</p>
+  <h2><span class="n">04</span>The four styles</h2>
+  <p class="sub">Labels were renamed on 2026-10-15; the test and examples below keep the old names (New skill + new format = Standard review, Caveman + new format = Caveman review, Caveman + old format = Caveman, old format). A style decides the skill, the plugin, the prompts and the output shape. Only the chosen style's plugin is loaded into a review.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Key</th><th>Label</th><th>Skill</th><th>Prompts</th><th>Findings</th></tr></thead>
     <tbody>
-      <tr><td><code>readable</code> (default)</td><td>New skill + new format</td><td><code>proxy-reviewer:readable-review</code> from <code>plugin/</code> in this repo</td><td><code>prompts/review.md</code>, <code>prompts/follow-up.md</code></td><td>Six parts</td></tr>
-      <tr><td><code>caveman-readable</code></td><td>Caveman + new format</td><td><code>caveman:caveman-review</code> (installed plugin)</td><td>same as above</td><td>Six parts</td></tr>
-      <tr><td><code>caveman-classic</code></td><td>Caveman + old format</td><td><code>caveman:caveman-review</code></td><td><code>prompts/review-classic.md</code>, <code>prompts/follow-up-classic.md</code></td><td>One <code>body</code>, as before issue #6</td></tr>
+      <tr><td><code>readable</code></td><td>Standard review</td><td><code>proxy-reviewer:readable-review</code> from <code>plugin/</code> in this repo</td><td><code>prompts/review.md</code>, <code>prompts/follow-up.md</code></td><td>Six parts</td></tr>
+      <tr><td><code>deep</code> (default since 2026-10-15)</td><td>Deep review</td><td><code>proxy-reviewer:deep-review</code> from <code>plugin/</code></td><td>same as above</td><td>Six parts</td></tr>
+      <tr><td><code>caveman-readable</code></td><td>Caveman review</td><td><code>caveman:caveman-review</code> (installed plugin)</td><td>same as above</td><td>Six parts</td></tr>
+      <tr><td><code>caveman-classic</code></td><td>Caveman, old format</td><td><code>caveman:caveman-review</code></td><td><code>prompts/review-classic.md</code>, <code>prompts/follow-up-classic.md</code></td><td>One <code>body</code>, as before issue #6</td></tr>
     </tbody>
   </table></div>
   <p>The new skill (<code>plugin/skills/readable-review/SKILL.md</code>, about 2.3 KB; caveman's is 2.8 KB) is just a text file of writing rules: who reads a finding (a person who may not know the code, and the author or their AI tool), how to write each part, what the severities mean, and what to avoid. It is loaded the same way caveman is, through the first line of the prompt. No new program or service.</p>
+</section>
+
+<section id="deep">
+  <h2><span class="n">04b</span>Deep review: tested on PR #2151</h2>
+  <p class="sub">PR #2151 (38 files, 110 KB diff), commit <code>c963590</code>, Opus 5.5, high effort, nothing posted. Each style ran alone, with the 5-hour session usage read just before and after (whole percent, so about ±1%). 2026-10-15.</p>
+  <p>The posted Standard review found one problem. A deep check by hand found six more, so the Deep review skill asks one agent (no sub-agents) to do two jobs: check the PR against every promise in its ticket and description, and check the code by tracing callers, data that can be missing or stale, and paths such as a reused screen. The finding format is unchanged.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Style</th><th>5-hour session</th><th>Cost</th><th>Turns</th><th>Time</th><th>Findings</th></tr></thead>
+    <tbody>
+      <tr><td>Standard review</td><td>5%</td><td>$1.35</td><td>30</td><td>2.3 min</td><td>1 (1 risk)</td></tr>
+      <tr><td>Caveman review</td><td>5%</td><td>$1.26</td><td>24</td><td>2.1 min</td><td>2 (1 risk, 1 nit)</td></tr>
+      <tr><td>Deep review</td><td>8%</td><td>$1.91</td><td>37</td><td>3.9 min</td><td>5 (1 risk, 3 nits, 1 ticket question)</td></tr>
+    </tbody>
+  </table></div>
+  <p>Caveman writes shorter findings, but writing is a small part of the cost: most of it is re-reading the conversation every turn, so the cost follows the number of turns, not the style of writing. Two deep runs each found different nits, and neither caught a colour flash on a reused canvas; one agent has a limit. Deep review is the default since 2026-10-15; pick Sonnet in the model picker to run it for less (3-4% of the session on this PR, and it found the canvas flash both Opus runs missed), or Standard review to save more.</p>
 </section>
 
 <section id="test">

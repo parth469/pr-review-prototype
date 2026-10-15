@@ -4,7 +4,7 @@ A local background process that finds GitHub PRs where you are a requested revie
 
 **Status: M6 (follow-up review).** It finds review requests, checks out each PR, has Claude review it, and posts the review to the PR under your account: a summary plus one inline comment per finding. When the author pushes fixes and asks for your review again, it checks each earlier finding, replies in its thread, and approves or asks only for what is still open. Design: [`docs/follow-up-review.html`](docs/follow-up-review.html).
 
-Each finding is written so a person can judge it and an AI tool can fix it: a plain title, what's wrong, what happens if it's not fixed, the fix (with a one-click GitHub suggestion when safe), and the reasoning folded underneath. Three review styles can be picked on the status page; why, what each costs and what we picked: [`docs/review-styles.html`](docs/review-styles.html).
+Each finding is written so a person can judge it and an AI tool can fix it: a plain title, what's wrong, what happens if it's not fixed, the fix (with a one-click GitHub suggestion when safe), and the reasoning folded underneath. Four review styles can be picked on the status page; why, what each costs and what we picked: [`docs/review-styles.html`](docs/review-styles.html).
 
 A review that would **request changes** waits on the status page for your OK first: post it, drop findings you disagree with, take your time or discard it. If you do nothing, it posts as it is after 30 minutes. Design, decisions and what is left for later: [`docs/hold-for-your-ok.html`](docs/hold-for-your-ok.html).
 
@@ -12,7 +12,7 @@ A review that would **request changes** waits on the status page for your OK fir
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
 - [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`. The daemon reuses that login.
 - [Claude Code](https://code.claude.com/), logged in. Reviews use your Claude Code login through the Agent SDK.
-- Only for the two caveman review styles: the `caveman` Claude Code plugin (provides `/caveman:caveman-review`). The default style uses the skill in `plugin/`, which ships with this repo.
+- Only for the two caveman review styles: the `caveman` Claude Code plugin (provides `/caveman:caveman-review`). The Standard and Deep styles use the skills in `plugin/`, which ships with this repo.
 
 ## Setup
 ```sh
@@ -58,7 +58,7 @@ Open **http://localhost:4777** while the server runs. Pages are built on the ser
 | **Drop / Keep** | each new finding of a review that needs your OK | Leaves the finding out of the post (the author never sees it), or puts it back. Saved at once; the timer uses your choices. |
 | **Pause posting / Resume** | header | While paused, reviews still run and wait unposted. Resume posts them. Survives restarts. |
 
-**Next review** in the header holds the **Model**, **Effort** and **Style** pickers. Style is how findings are written: *New skill + new format* (default), *Caveman + new format* or *Caveman + old format*. A pick applies from the next review on, survives restarts, and a running review keeps what it started with. See [`docs/review-styles.html`](docs/review-styles.html). **Wait for OK** sets how long a review that would request changes waits for you: Off, 15, 30 min, 1 h or 2 h. A review already waiting keeps its time.
+**Next review** in the header holds the **Model**, **Effort** and **Style** pickers. Style is how findings are written: *Deep review* (default), *Standard review*, *Caveman review* or *Caveman, old format*. Deep review has one agent also trace callers, missing data and every promise in the ticket; on PR #2151 it found 5 problems where Standard found 1, for about 8% of the 5-hour session instead of 5%. A pick applies from the next review on, survives restarts, and a running review keeps what it started with. See [`docs/review-styles.html`](docs/review-styles.html). **Wait for OK** sets how long a review that would request changes waits for you: Off, 15, 30 min, 1 h or 2 h. A review already waiting keeps its time.
 
 It listens on 127.0.0.1 only. Buttons need a secret token that is only in the page, and requests for other host names are refused, so other websites open in your browser can't press them. Turn it off or move it with `statusPage.enabled` and `statusPage.port`.
 
@@ -92,10 +92,10 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 | `review.model` | `claude-opus-5-5` | `claude-opus-5-5` or `claude-sonnet-5-5`. Default only: a pick on the status page wins |
 | `review.effort` | `high` | `low`, `medium` or `high`. Default only, like `model` |
 | `review.maxSessionUsagePct` | `90` | Reviews wait in the queue while the 5-hour session usage is at or above this percent, until the window resets. `null` = never |
-| `review.style` | `readable` | `readable` (new skill + new format), `caveman-readable` or `caveman-classic` (the format before issue #6). Default only, like `model`. Each style's skill, plugin and prompts are in `src/styles.ts` |
+| `review.style` | `deep` | `deep` (Deep review), `readable` (Standard review), `caveman-readable` (Caveman review) or `caveman-classic` (the format before issue #6). Default only, like `model`. Each style's skill, plugin and prompts are in `src/styles.ts` |
 | `review.pluginPath` | `null` | Caveman plugin folder, for the caveman styles; `null` finds the installed `caveman@caveman` |
 | `review.timeoutMin` | `20` | Stop a review after this long |
-| `review.maxTurns` | `80` | Stop a review after this many turns |
+| `review.maxTurns` | `50` | Stop a review after this many turns. A run that hits it is thrown away and retried, so keep room above the ~25-50 turns a review takes |
 | `review.maxAttempts` | `3` | Tries before a job is marked `failed` (retries after 5 and 20 min) |
 | `review.keepWorktree` | `false` | Keep the checkout for debugging |
 | `gitTimeoutSec` | `300` | Kill a git command (and its helpers) that runs longer than this |
@@ -121,7 +121,7 @@ It listens on 127.0.0.1 only. Buttons need a secret token that is only in the pa
 
 ## How it works
 1. **Detect.** Searches GitHub for `is:pr is:open user-review-requested:@me archived:false` (direct requests only), applies the skip rules and records `(repo, pr, head_sha)` in `data/state.db`. The same commit is only handled once, even across restarts. A newer push supersedes an older commit that is still waiting.
-2. **Prepare.** Fetches the PR head into a partial clone under `cache/` and checks it out in its own folder under `work/`, with `.review/diff.patch`, `files.json` and `pr.json`.
+2. **Prepare.** Fetches the PR head into a partial clone under `cache/` and checks it out in its own folder under `work/`, with `.review/diff.patch` (code), `tests.patch` (test files), `files.json` and `pr.json`. Tests are kept apart because whatever Claude reads is re-read on every later turn; it reads them only to check them.
 3. **Review.** Runs Claude in that folder through the Agent SDK with the prompt from `prompts/review.md`. Findings come back as JSON checked against a schema.
 4. **Save.** Writes everything to `reviews/<owner>-<repo>-<pr>-<sha>/`, marks the job `reviewed` and removes the checkout.
 5. **Publish.** Posts one review against the reviewed commit:

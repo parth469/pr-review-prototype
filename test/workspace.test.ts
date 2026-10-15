@@ -111,6 +111,7 @@ describe("workspace", { timeout: 60_000 }, () => {
     );
     expect(await git(["rev-parse", "HEAD"], { cwd: prepared.dir })).toBe(origin.headSha);
     expect(readFileSync(join(prepared.dir, ".review", "diff.patch"), "utf8")).toContain("app.ts");
+    expect(readFileSync(join(prepared.dir, ".review", "tests.patch"), "utf8")).toBe("");
     const meta = JSON.parse(readFileSync(join(prepared.dir, ".review", "pr.json"), "utf8"));
     expect(meta).toMatchObject({ repo: "acme/api", number: 1, base: "main" });
 
