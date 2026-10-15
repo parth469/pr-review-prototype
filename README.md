@@ -181,7 +181,11 @@ Job states: `queued → preparing → reviewing → reviewed → posting → don
 | `ticket.json` | The PR's ticket as Claude got it; only when one was found |
 | `previous.json`, `threads.json`, `since-last.patch` | Follow-ups only: the earlier findings, replies and changes Claude checked |
 
+### Continue a review in Claude Code
+Each review's session is kept, so you can ask Claude follow-up questions about it. Open the review on the status page and run the `claude --resume <session id>` line it shows, from any directory. Sessions are never cleaned up; delete old ones from `~/.claude/projects`. Reviews run before this change have no session to resume.
+
 ### Safety
+
 - Claude gets only `Read`, `Grep` and `Glob` in the checkout. Everything else is denied.
 - No Claude Code settings, hooks or `CLAUDE.md` are loaded from the PR's repo, since a PR could add them. Only the review plugin is loaded.
 - Claude runs without any GitHub token in its environment.
