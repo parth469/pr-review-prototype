@@ -99,7 +99,12 @@ describe("createReviewer", () => {
     const args = input();
     const result = await run(args);
 
-    expect(result).toMatchObject({ costUsd: 1.5, durationMs: 120_000, numTurns: 12 });
+    expect(result).toMatchObject({
+      costUsd: 1.5,
+      durationMs: 120_000,
+      numTurns: 12,
+      sessionId: "s1",
+    });
     expect(result.review.findings).toHaveLength(1);
     expect(seen.options).toMatchObject({
       model: "claude-opus-5-5",
@@ -110,6 +115,7 @@ describe("createReviewer", () => {
       allowedTools: ALLOWED_TOOLS,
       plugins: [{ type: "local", path: "/plugins/caveman" }],
       outputFormat: { type: "json_schema" },
+      persistSession: true,
     });
     expect(seen.options?.disallowedTools).toContain("Bash");
     expect(readFileSync(args.transcriptPath, "utf8").trim().split("\n")).toHaveLength(2);

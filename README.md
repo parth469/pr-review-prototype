@@ -12,6 +12,7 @@ A review that would **request changes** waits on the status page for your OK fir
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
 - [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`. The daemon reuses that login.
 - [Claude Code](https://code.claude.com/), logged in. Reviews use your Claude Code login through the Agent SDK.
+- Linux only: `notify-send` (from `libnotify-bin`/`libnotify-tools`) for desktop notifications. Windows uses PowerShell toasts instead; either way it's optional — reviews still run with `notify.enabled: false` or the binary missing.
 - Only for the two caveman review styles: the `caveman` Claude Code plugin (provides `/caveman:caveman-review`). The Standard and Deep styles use the skills in `plugin/`, which ships with this repo.
 
 ## Setup
@@ -181,7 +182,11 @@ Job states: `queued → preparing → reviewing → reviewed → posting → don
 | `ticket.json` | The PR's ticket as Claude got it; only when one was found |
 | `previous.json`, `threads.json`, `since-last.patch` | Follow-ups only: the earlier findings, replies and changes Claude checked |
 
+### Continue a review in Claude Code
+Each review's session is kept, so you can ask Claude follow-up questions about it. Open the review on the status page and run the `claude --resume <session id>` line it shows, from any directory. Sessions are never cleaned up; delete old ones from `~/.claude/projects`. Reviews run before this change have no session to resume.
+
 ### Safety
+
 - Claude gets only `Read`, `Grep` and `Glob` in the checkout. Everything else is denied.
 - No Claude Code settings, hooks or `CLAUDE.md` are loaded from the PR's repo, since a PR could add them. Only the review plugin is loaded.
 - Claude runs without any GitHub token in its environment.

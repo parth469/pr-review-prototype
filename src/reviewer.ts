@@ -262,7 +262,7 @@ export function buildOptions(
     permissionMode: "dontAsk",
     outputFormat: { type: "json_schema", schema: outputSchema },
     maxTurns: settings.maxTurns,
-    persistSession: false,
+    persistSession: true, // so `claude --resume <sessionId>` can continue a review
     env: sanitizedEnv(),
     abortController,
   };

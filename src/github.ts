@@ -20,7 +20,8 @@ export const REVIEW_REQUEST_QUERY = "is:pr is:open user-review-requested:@me arc
 export async function getGhToken(): Promise<string> {
   try {
     const { stdout } = await execFileAsync("gh", ["auth", "token"], { windowsHide: true });
-    const token = stdout.trim();
+    // Version managers (mise, asdf) can print notices on stdout before the token; it is the last line.
+    const token = stdout.trim().split(/\r?\n/).pop()?.trim();
     if (token) return token;
   } catch {
     // fall through to the error below

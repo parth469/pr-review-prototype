@@ -1,7 +1,7 @@
 import type { Finding, ReviewRun } from "../reviewer.ts";
 import type { Job } from "../state.ts";
 import type { TicketContext } from "../ticket.ts";
-import { type Html, html, richText } from "./html.ts";
+import { type Html, html, raw, richText } from "./html.ts";
 import { actionForm, ago, type Chrome, countdown, money, page } from "./layout.ts";
 import { describeJob, droppedIds, type PrView, prPath } from "./prs.ts";
 
@@ -16,6 +16,13 @@ export interface ReviewPageInput {
   openRound: number | null;
   canApprove: boolean;
 }
+
+const SVG = (d: string) =>
+  `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const COPY_ICONS = raw(
+  `<span class="i-copy">${SVG('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>')}</span>` +
+    `<span class="i-done">${SVG('<path d="M20 6 9 17l-5-5"/>')}</span>`,
+);
 
 const SEVERITY: Record<string, [string, string]> = {
   bug: ["🔴 bug", "change"],
@@ -248,6 +255,11 @@ ${
 }
 <div class="stack">${actions(job, input)}</div>
 <p class="small"><a href="${safeHref(pr.url)}" target="_blank" rel="noopener noreferrer">PR on GitHub ↗</a>${job.review_url ? html` · <a href="${safeHref(job.review_url)}" target="_blank" rel="noopener noreferrer">Posted review ↗</a>` : ""}</p>
+${
+  run?.sessionId
+    ? html`<h4>Continue in Claude Code</h4><div class="copyrow"><code class="resume">claude --resume ${run.sessionId}</code><button type="button" class="copy" data-copy=".resume" title="Copy" aria-label="Copy command">${COPY_ICONS}</button></div>`
+    : ""
+}
 ${
   ticket === undefined
     ? ""
