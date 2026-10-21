@@ -12,6 +12,7 @@ A review that would **request changes** waits on the status page for your OK fir
 - Node.js 24.15 or newer (see `.node-version`). With nvm-windows: `nvm install 24.21.0` then `nvm use 24.21.0`
 - [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`. The daemon reuses that login.
 - [Claude Code](https://code.claude.com/), logged in. Reviews use your Claude Code login through the Agent SDK.
+- Linux only: `notify-send` (from `libnotify-bin`/`libnotify-tools`) for desktop notifications. Windows uses PowerShell toasts instead; either way it's optional — reviews still run with `notify.enabled: false` or the binary missing.
 - Only for the two caveman review styles: the `caveman` Claude Code plugin (provides `/caveman:caveman-review`). The default style uses the skill in `plugin/`, which ships with this repo.
 
 ## Setup

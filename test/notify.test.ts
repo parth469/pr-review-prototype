@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildNotifySendArgs,
   buildToastScript,
   buildToastXml,
   createNotifier,
@@ -49,6 +50,19 @@ describe("toast", () => {
     expect(script).toContain("<text>$(Remove-Item x)</text>");
     expect(script).toContain("</toast>\n'@\n");
     expect(script).toContain("CreateToastNotifier(");
+  });
+});
+
+describe("buildNotifySendArgs", () => {
+  it("passes title and body as separate argv entries after --, body markup escaped", () => {
+    expect(
+      buildNotifySendArgs({ title: "-Requested changes", body: "2 bugs — Fix <Foo> & bar" }),
+    ).toEqual([
+      "--app-name=Proxy Reviewer",
+      "--",
+      "-Requested changes",
+      "2 bugs — Fix &lt;Foo&gt; &amp; bar",
+    ]);
   });
 });
 
@@ -145,11 +159,21 @@ describe("notificationFor", () => {
 });
 
 describe("createNotifier", () => {
-  it("runs the script on Windows and never throws", async () => {
-    const scripts: string[] = [];
-    const ok = createNotifier({ enabled: true }, silentLog, async (s) => void scripts.push(s));
+  it("runs a command on Windows and Linux, never throws", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const ok = createNotifier(
+      { enabled: true },
+      silentLog,
+      async (command, args) => void calls.push({ command, args }),
+    );
     await ok.notify({ title: "T", body: "B" });
-    expect(scripts).toHaveLength(process.platform === "win32" ? 1 : 0);
+    const supported = process.platform === "win32" || process.platform === "linux";
+    expect(calls).toHaveLength(supported ? 1 : 0);
+    if (supported) {
+      expect(calls[0]?.command).toBe(
+        process.platform === "win32" ? "powershell.exe" : "notify-send",
+      );
+    }
 
     const broken = createNotifier({ enabled: true }, silentLog, async () => {
       throw new Error("no toast");
