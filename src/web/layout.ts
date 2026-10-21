@@ -187,6 +187,14 @@ document.querySelectorAll("form[data-confirm]").forEach(function (f) {
 document.querySelectorAll("select[data-autosubmit]").forEach(function (s) {
   s.addEventListener("change", function () { s.form.requestSubmit(); });
 });
+document.querySelectorAll("button[data-copy]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    navigator.clipboard.writeText(document.querySelector(b.getAttribute("data-copy")).textContent).then(function () {
+      b.classList.add("done"); b.title = "Copied";
+      setTimeout(function () { b.classList.remove("done"); b.title = "Copy"; }, 1500);
+    }, function () { b.title = "Copy failed: select the text and copy by hand"; });
+  });
+});
 var busy = false;
 document.addEventListener("submit", function () { busy = true; });
 setInterval(function () {
@@ -305,5 +313,11 @@ table.prev td.fid { white-space:nowrap; overflow-wrap:normal; }
 .panel-in { position:sticky; top:12px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; }
 .panel h4 { margin:6px 0 0; display:flex; gap:8px; align-items:center; font-size:14px; }
 .panel .stack { display:flex; flex-direction:column; gap:6px; } .panel .stack button { width:100%; }
+.copyrow { display:flex; align-items:stretch; gap:6px; }
+.copyrow .resume { flex:1; min-width:0; word-break:break-all; user-select:all; font-size:11.5px; padding:6px 8px; }
+button.copy { padding:0 8px; display:flex; align-items:center; color:var(--muted); }
+button.copy:hover { color:var(--ink); }
+button.copy .i-done, button.copy.done .i-copy { display:none; }
+button.copy.done .i-done { display:inline; color:var(--ok); }
 .panel ul { padding-left:18px; margin:0; } .big { font-size:22px; font-weight:700; margin:0; }
 `;
