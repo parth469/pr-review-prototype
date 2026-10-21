@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { filterPatch, parseAddedLines, parseCommentableLines, touchedFiles } from "../src/diff.ts";
+import {
+  filterPatch,
+  isTestPath,
+  parseAddedLines,
+  parseCommentableLines,
+  splitTestPatch,
+  touchedFiles,
+} from "../src/diff.ts";
 
 const lines = (patch: string, path: string) => [...(parseCommentableLines(patch).get(path) ?? [])];
 
@@ -147,4 +154,45 @@ describe("filterPatch", () => {
   it("keeps nothing when no file matches", () => {
     expect(filterPatch(TWO_FILES, new Set(["other.ts"]))).toBe("");
   });
+});
+
+describe("splitTestPatch", () => {
+  const section = (path: string) =>
+    `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b`;
+
+  it("puts test files in tests and everything else in code, keeping their order", () => {
+    const patch = [
+      section("src/a.ts"),
+      section("src/a.test.ts"),
+      section("web/b.tsx"),
+      section("test/c.ts"),
+    ].join("\n");
+    const { code, tests } = splitTestPatch(patch);
+    expect(code).toBe([section("src/a.ts"), section("web/b.tsx")].join("\n"));
+    expect(tests).toBe([section("src/a.test.ts"), section("test/c.ts")].join("\n"));
+  });
+
+  it("gives empty strings for an empty side", () => {
+    expect(splitTestPatch(section("src/a.ts")).tests).toBe("");
+    expect(splitTestPatch(section("src/a.spec.tsx")).code).toBe("");
+  });
+});
+
+describe("isTestPath", () => {
+  it.each([
+    "src/a.test.ts",
+    "src/a.spec.tsx",
+    "src/__tests__/a.ts",
+    "src/__mocks__/a.ts",
+    "tests/a.py",
+    "app/e2e/login.ts",
+    "pkg/x_test.go",
+    "lib/test_x.py",
+    "explore-graph.repaint.test.ts",
+  ])("%s is a test", (p) => expect(isTestPath(p)).toBe(true));
+
+  it.each(["src/testing.ts", "src/contest/a.ts", "src/latest.ts", "src/test-utils.ts"])(
+    "%s is code",
+    (p) => expect(isTestPath(p)).toBe(false),
+  );
 });

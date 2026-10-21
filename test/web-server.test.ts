@@ -391,11 +391,12 @@ describe("status server", () => {
       effort: "high",
       models: ["claude-opus-5-5", "claude-sonnet-5-5"],
       efforts: ["low", "medium", "high"],
-      style: "readable",
+      style: "deep",
       styles: [
-        { key: "readable", label: "New skill + new format" },
-        { key: "caveman-readable", label: "Caveman + new format" },
-        { key: "caveman-classic", label: "Caveman + old format" },
+        { key: "readable", label: "Standard review" },
+        { key: "deep", label: "Deep review" },
+        { key: "caveman-readable", label: "Caveman review" },
+        { key: "caveman-classic", label: "Caveman, old format" },
       ],
       sessionUsage: null,
     });
@@ -403,7 +404,7 @@ describe("status server", () => {
     expect(JSON.parse((await set({ model: "claude-sonnet-5-5" })).body)).toEqual({
       model: "claude-sonnet-5-5",
       effort: "high",
-      style: "readable",
+      style: "deep",
     });
     await set({ effort: "low" });
     await set({ style: "caveman-classic" });

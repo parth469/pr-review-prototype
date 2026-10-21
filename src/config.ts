@@ -7,7 +7,7 @@ export const EFFORTS = ["low", "medium", "high"] as const;
 export type Model = (typeof MODELS)[number];
 export type Effort = (typeof EFFORTS)[number];
 /** How findings are written; also pickable on the status page. See docs/review-styles.html. */
-export const STYLES = ["readable", "caveman-readable", "caveman-classic"] as const;
+export const STYLES = ["readable", "deep", "caveman-readable", "caveman-classic"] as const;
 export type Style = (typeof STYLES)[number];
 /** Minutes a review that would request changes waits for you, as offered on the status page. */
 export const HOLD_CHOICES = [0, 15, 30, 60, 120] as const;
@@ -45,11 +45,11 @@ export const configSchema = z.object({
       effort: z.enum(EFFORTS).default("high"),
       // Hold reviews while the 5-hour session usage is at or above this percent. null = never.
       maxSessionUsagePct: z.number().min(1).max(100).nullable().default(90),
-      style: z.enum(STYLES).default("readable"),
+      style: z.enum(STYLES).default("deep"),
       // Folder of the caveman plugin, for the caveman styles. null = the installed "caveman@caveman".
       pluginPath: z.string().min(1).nullable().default(null),
       timeoutMin: z.number().positive().default(20),
-      maxTurns: z.number().int().positive().default(80),
+      maxTurns: z.number().int().positive().default(50),
       maxAttempts: z.number().int().positive().default(3),
       keepWorktree: z.boolean().default(false),
     })

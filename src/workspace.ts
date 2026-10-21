@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { splitTestPatch } from "./diff.ts";
 import { git } from "./git.ts";
 import type { Job } from "./state.ts";
 import type { PullFile, PullRequest, PullSource } from "./types.ts";
@@ -98,7 +99,9 @@ export function createWorkspace(options: WorkspaceOptions): Workspace {
       ]);
       const reviewDir = join(dir, ".review");
       await mkdir(reviewDir, { recursive: true });
-      await writeFile(join(reviewDir, "diff.patch"), diff);
+      const { code, tests } = splitTestPatch(diff);
+      await writeFile(join(reviewDir, "diff.patch"), code);
+      await writeFile(join(reviewDir, "tests.patch"), tests);
       await writeFile(join(reviewDir, "files.json"), `${JSON.stringify(files, null, 2)}\n`);
       await writeFile(
         join(reviewDir, "pr.json"),

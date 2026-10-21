@@ -59,10 +59,10 @@ describe("runPreflight", () => {
 
   it("checks the default style's skill file inside its plugin", async () => {
     const err = await failure({
-      exists: (p) => !p.replace(/\\/g, "/").includes("readable-review/SKILL.md"),
+      exists: (p) => !p.replace(/\\/g, "/").includes("deep-review/SKILL.md"),
     });
     expect(err.message).toMatch(
-      /style readable: .*bundled.*readable-review[\\/]SKILL\.md is missing/,
+      /style deep: .*bundled.*deep-review[\\/]SKILL\.md is missing/,
     );
   });
 
@@ -75,7 +75,8 @@ describe("runPreflight", () => {
     expect(
       results.filter((r) => r.name.startsWith("style ")).map((r) => [r.name, r.ok, r.fatal]),
     ).toEqual([
-      ["style readable", true, true],
+      ["style readable", true, false],
+      ["style deep", true, true],
       ["style caveman-readable", false, false],
       ["style caveman-classic", false, false],
     ]);

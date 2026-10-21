@@ -25,10 +25,10 @@ describe("config", () => {
         model: "claude-opus-5-5",
         effort: "high",
         maxSessionUsagePct: 90,
-        style: "readable",
+        style: "deep",
         pluginPath: null,
         timeoutMin: 20,
-        maxTurns: 80,
+        maxTurns: 50,
         maxAttempts: 3,
         keepWorktree: false,
       },
@@ -69,10 +69,10 @@ describe("config", () => {
     );
   });
 
-  it("offers three review styles and still loads a config from before them", () => {
+  it("offers four review styles and still loads a config from before them", () => {
     expect(() => parseConfig({ review: { style: "terse" } })).toThrow(/style/);
     const old = parseConfig({ review: { skill: "caveman:caveman-review", promptFile: "x.md" } });
-    expect(old.review.style).toBe("readable");
+    expect(old.review.style).toBe("deep");
     expect(old.review).not.toHaveProperty("skill");
   });
 
